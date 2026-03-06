@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orchestra"
+version = "0.1.0"
+description = "Minimal orchestration scaffold for coordinating distributed model workers."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pyzmq",
+    "tqdm",
+    "Pillow",
+]
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
