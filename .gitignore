@@ -1,5 +1,7 @@
 .venv
+.vscode
 .ruff_cache
+__pycache__
 
 build
 dist

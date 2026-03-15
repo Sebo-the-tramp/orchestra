@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orchestra-worker-sam3"
+version = "0.1.0"
+description = "SAM3 segmentation worker for ORCHESTRA."
+requires-python = "==3.12.*"
+dependencies = [
+    "sam3",
+    "torch==2.7.0",
+    "torchvision==0.22.0",
+    "torchaudio==2.7.0",
+    "matplotlib",
+    "numpy",
+    "Pillow",
+    "pyzmq",
+    "tqdm",
+]
+
+[tool.setuptools]
+py-modules = ["worker_sam3"]
+
+[tool.uv.sources]
+sam3 = { git = "https://github.com/facebookresearch/sam3.git" }
+torch = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+torchaudio = { index = "pytorch-cu126" }
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true

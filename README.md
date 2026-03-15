@@ -2,7 +2,7 @@
 
 ORCHESTRA is a barebone autonomous dispatch layer for serious model serving 🎼: one broker, many stupid workers, minimal maintenance, minimal downtime, and clean routing of any well-formed request to the right compute.
 
-The design is intentionally simple 🎻. `broker.py` is the central mind that tracks queues, workers, and resources. Each worker in `./workers/` does one thing only: take assigned work, execute it, report back, and die when idle. `example_client.py` is the seed for the external interface that will eventually grow into the public-facing API layer 🎹.
+The design is intentionally simple 🎻. `broker.py` is the central mind that tracks queues, workers, and resources. Each worker in `./workers/` does one thing only: take assigned work, execute it, report back, and die when idle. `example_client.py` is the seed for the external interface that will eventually grow into the public-facing API layer 🎹. The goal is being able to run natively *any* model supported in huggingface, with their own implementation and speed, with orchestra being the middle layer with zero overhead. Similar to having all models on the GPU at the *same time*.
 
 Think of the broker as a conductor with a magician's baton ✨: one precise gesture, and the right section starts playing at the right time on the right machine. You are the magician now!
 

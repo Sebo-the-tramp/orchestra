@@ -1,0 +1,85 @@
+models:
+  OpenGVLab/InternVL3_5-2B: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3_5-4B: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3_5-8B: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3_5-14B: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3_5-38B:
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 2
+
+  OpenGVLab/InternVL3-2B-AWQ:
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3-8B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3-9B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3-14B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL3-38B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 2
+
+  OpenGVLab/InternVL3-78B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 3
+
+  OpenGVLab/InternVL2_5-2B: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL2_5-4B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL2_5-8B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL2_5-26B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 1
+
+  OpenGVLab/InternVL2_5-38B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 2
+
+  OpenGVLab/InternVL2_5-78B-AWQ: 
+    basefolder: OpenGVLab/InternVL
+    gpu_memory: 16000
+    tp: 3
