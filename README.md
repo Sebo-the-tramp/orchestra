@@ -1,4 +1,6 @@
-# orchestra
+# 🎶 orchestra 🎶
+
+## ATTENTION, the repo is heavily under construction ETA 1 week with first working models
 
 ORCHESTRA is a barebone autonomous dispatch layer for serious model serving 🎼: one broker, many stupid workers, minimal maintenance, minimal downtime, and clean routing of any well-formed request to the right compute.
 
