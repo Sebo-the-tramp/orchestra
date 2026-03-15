@@ -21,14 +21,13 @@ from pydantic import BaseModel
 from dataclasses import dataclass, field
 
 # Constants
-
 ROOT = Path(__file__).resolve().parent
 WORKERS_PATH = ROOT / "models"
 ROUTER_ADDRESS = "tcp://10.10.151.14:5556"
 POLL_TIMEOUT_MS = 1000
-IDLE_WORKER_TIMEOUT_SECONDS = 100.0
-BUSY_WORKER_TIMEOUT_SECONDS = 3600.0
-SPAWN_TIMEOUT_SECONDS = 120.0
+IDLE_WORKER_TIMEOUT_SECONDS = 10.0
+BUSY_WORKER_TIMEOUT_SECONDS = 360.0
+SPAWN_TIMEOUT_SECONDS = 10.0
 GBATCH_GPUS = "2"
 GBATCH_TIME = "2:00:00"
 
@@ -38,7 +37,6 @@ MODELS_REGISTRY: Dict[str, Type[BaseModel]] = {}
 MODELS_CONFIG: Dict[str, Any] = {}
 
 ## Startup functions
-
 def discover_models():
     mods=[m for _,m,p in pkgutil.walk_packages(models.__path__,models.__name__+".") if p]
     for m in tqdm(mods):
@@ -53,9 +51,7 @@ def discover_models():
 discover_models()
 
 # Classes definitions
-
 ## Job definition
-
 @dataclass(slots=True)
 class Payload:
     model_name: str
@@ -70,7 +66,6 @@ class Job:
 
 
 ## Worker definition
-
 class WorkerStatus(Enum):
     IDLE = "IDLE"
     BUSY = "BUSY"    
@@ -78,10 +73,11 @@ class WorkerStatus(Enum):
 
 @dataclass(slots=True)
 class Worker:
-    model: str
+    model_name: str
     process: Any
     started_at: float
     status: WorkerStatus = WorkerStatus.WAITING
+    process: Any
 
 
 @dataclass(slots=True)
@@ -105,26 +101,36 @@ class WorkerPool:
 
     @property
     def total_count(self) -> int:
-        return len(self.idle_workers + self.busy_workers + self.wait_workers)
+        return len(self.idle_workers) + len(self.busy_workers) + len(self.wait_workers)
+
+    def discard_worker_id(self, worker_id):
+        self.busy_workers.discard(worker_id)
+        self.idle_workers.discard(worker_id)
+        self.wait_workers.discard(worker_id)
+
+    def is_empty(self):
+        return (len(self.busy_workers) + len(self.idle_workers) + len(self.wait_workers)) == 0
 
 
 # Broker state definition
 @dataclass(slots=True)
 class BrokerState:
     worker_registry: dict[str, WorkerPool] = field(default_factory=dict)
+    worker_map: dict[str, Worker] = field(default_factory=dict)
     # job_queue: deque[Job] = field(default_factory=deque)
     jobs_registry: dict[str, deque[Job]] = field(default_factory=dict)
     pending_jobs: dict[str, Job] = field(default_factory=dict) # request_id -> Job
+    inflight_by_worker: dict[str, Job] = field(default_factory=dict)
     
     def has_active_worker_by_model(self, model_name: str) -> bool:
         """Checks if a worker exists and is actually populated."""
-        return bool(self.worker_registry.get(model_name))
+        pool = self.worker_registry.get(model_name)
+        return pool is not None and not pool.is_empty()
 
     def get_model_config(self, model_name: str) -> dict[str, Any] | None:
         return MODELS_CONFIG.get(model_name)
 
     def enqueue_job(self, job):  
-        
         job_model = job.payload["model_name"]
 
         if job_model not in self.jobs_registry:
@@ -143,13 +149,24 @@ class BrokerState:
         # worst but might work for now since gflow doesn't allow for shared multi-gpu allocation
         # worker_id, command = build_command_for_model_gflow(model_name, model_config) 
         print(f"spawning worker for model {model_name} with command: {' '.join(command)}")
-        process = subprocess.Popen(command)
+        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-        self.worker_registry[model_name] = WorkerPool()
+        new_worker = Worker(model_name=model_name, started_at=time.monotonic_ns(), status=WorkerStatus.WAITING, process=process)
+        self.worker_map[worker_id] = new_worker    
+
+        if self.worker_registry.get(model_name) is None:
+            self.worker_registry[model_name] = WorkerPool()
+        
         print(f"worker for model {model_name} spawned with id {worker_id} and process id {process.pid}")
         self.worker_registry[model_name].add_waiting_worker(worker_id) # we can use the process id as the worker id for now, but we need to make sure that when the worker is
 
         # when does it become idle -> how to deal with difference from WAITING maybe there is no difference
+
+    def remove_worker_id(worker_id, worker_model):
+        worker_map[worker_model].remove_worker_id(worker_id)
+        # remove entirely if the WorkerPool() is empty
+        if worker_map[worker_model].is_empty():
+            del worker_map[worker_model]
 
     #TODO maybe do it better here as full function instead of the schifo there    
     # def assign_job_to_worker(self, model_name: str, worker_id: bytes, job_to_send: Job):
@@ -208,7 +225,7 @@ def build_command_for_model_bare(model_name: str, model_config: dict[str, Any]) 
         "--model-id",
         model_name,
         "--router-connect",
-        ROUTER_ADDRESS,       
+        ROUTER_ADDRESS,
         "--worker-id",
         worker_id
     ]
@@ -247,6 +264,7 @@ def handle_worker_message(
         model_name = payload["model_name"]
         worker_id = worker_id.replace(model_name+"-", "")
         state.worker_registry[model_name].set_idle(worker_id)
+        state.inflight_by_worker.pop(worker_id, None)
         
         req_id = payload.get("req_id")
         print('req_id', req_id)
@@ -309,12 +327,13 @@ def dispatch_jobs(socket, state: BrokerState):
     # even this one runs once every 100 milliseconds
 
     # read first job in the list
+    queues_to_remove = []
 
     for model_name, job_queue in state.jobs_registry.items():
         print(f"model {model_name} has {len(job_queue)} jobs in the queue")
 
         if len(job_queue) == 0:
-            # remove the entry from the registry to avoid iterating over it in the future if there are no jobs for this model
+            queues_to_remove.append(model_name)
             continue
 
         # is there an active worker for this model?
@@ -322,13 +341,9 @@ def dispatch_jobs(socket, state: BrokerState):
         
         if not active_workers:            
             state.spawn_worker_for_model(model_name) # this should spawn a worker for the model and add it to the registry with status loading
-            
-            # need to spawn a worker for this model, but before that we need to check if we have the model in the config file
-
-        if active_workers and len(active_workers.idle_workers) == 0:            
+        if active_workers and len(active_workers.idle_workers) == 0:
             continue
-        
-        if active_workers and len(active_workers.wait_workers) > 0:            
+        if active_workers and len(active_workers.wait_workers) > 0:
             continue
         
         # TODO fix it and make it better -> cleaner
@@ -338,6 +353,7 @@ def dispatch_jobs(socket, state: BrokerState):
             active_workers.set_busy(chosen_worker_id) # here we need to assign the job to the worker and update the worker status to busy            
             job = job_queue.popleft() # remove the job from the queue
             state.pending_jobs[job.request_id] = job
+            state.inflight_by_worker[chosen_worker_id] = job
 
             # send the job to the worker
             metadata_bytes = json.dumps(job.payload).encode('utf-8')
@@ -345,13 +361,26 @@ def dispatch_jobs(socket, state: BrokerState):
             frames_to_send = [destination_worker_id, b"", metadata_bytes] + job.images
             socket.send_multipart(frames_to_send)
 
+    for model_name in queues_to_remove:
+        del state.jobs_registry[model_name] 
+
 
 def purge_dead_workers(state):
-    pass
+    # check the worker_maps
+    for worker_id, worker in list(state.worker_map.items()):
+        if worker.process.poll() is not None:
+            worker_model_name = worker.model_name
+            state.worker_registry[worker_model_name].discard_worker_id(worker_id)
+            job = state.inflight_by_worker.pop(worker_id, None)
+            if job is not None:
+                state.pending_jobs.pop(job.request_id, None)
+                state.jobs_registry.setdefault(worker_model_name, deque()).appendleft(job)
+            del state.worker_map[worker_id]
+            if state.worker_registry[worker_model_name].is_empty():
+                del state.worker_registry[worker_model_name]
 
 
 # Main loop
-
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     context = zmq.Context.instance()
@@ -362,12 +391,8 @@ def main() -> None:
 
     while True:
         receive_message(socket, state)
-    
+        purge_dead_workers(state)
         dispatch_jobs(socket, state)
-
-        # purge_dead_workers(state) #optional because workers kill themeselves when they are idle for too long, but we can also add this function to be sure that we don't have any dead workers in the registry
-        # only needed for high performance high concurrency with known ahead time processing
-
 
 
 if __name__ == "__main__":
