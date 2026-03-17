@@ -72,4 +72,10 @@ uv run python broker_core.py
 
 Important: the broker currently expects each worker folder declared in `config.yaml` to have its own `.venv` and `worker.py`. If that environment is missing, worker spawning will fail fast.
 
-`start_orchestra.sh` is not a full bootstrap yet. Right now it mainly checks whether `gflowd` is up.
+Just run 
+```bash
+start_orchestra.sh
+```
+
+
+## 
