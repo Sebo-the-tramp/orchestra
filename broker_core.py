@@ -149,7 +149,7 @@ class BrokerState:
         # worst but might work for now since gflow doesn't allow for shared multi-gpu allocation
         # worker_id, command = build_command_for_model_gflow(model_name, model_config) 
         print(f"spawning worker for model {model_name} with command: {' '.join(command)}")
-        process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        process = subprocess.Popen(command)
 
         new_worker = Worker(model_name=model_name, started_at=time.monotonic_ns(), status=WorkerStatus.WAITING, process=process)
         self.worker_map[worker_id] = new_worker    

@@ -75,7 +75,7 @@ def prepare_for_json(output):
     data = {}
     data["boxes"] = output['boxes'].cpu().tolist()
     data["masks"] = output['masks'].cpu().numpy().tolist()
-    data["scores"] = output['scores'].cpu().tolist()
+    data["scores"] = output['scores'].cpu().tolist()    
     return data
 
 
@@ -111,9 +111,14 @@ def main():
             prompt = payload.get("prompt")
             confidence_threshold = payload.get("confidence_threshold")
             pil_images = decode_images(frames[2:])
+            print(f"Decoded {len(pil_images)} images for request_id={req_id}")
+
+            print(f"Received request with prompt: {prompt} and confidence_threshold: {confidence_threshold}")
 
             response = single_image_model_inference(processor, pil_images[0], prompt=prompt[0], confidence_threshold=confidence_threshold[0])                
+            print(f"Model inference completed for request_id={req_id}, preparing response", response)
             clean_response = prepare_for_json(response)            
+            print(f"Prepared data for JSON serialization: boxes={len(clean_response['boxes'])}, masks={len(clean_response['masks'])}, scores={len(clean_response['scores'])}")
             logger.info("Processed request_id=%s successfully", req_id)
             socket.send_json({"type": "SUCCESS", "req_id": payload.get("request_id"), "answer": clean_response, "model_name": DEFAULT_MODEL_ID})
         except Exception:

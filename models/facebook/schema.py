@@ -1,6 +1,5 @@
 from pydantic import BaseModel, Field
 
-
 class Sam3Config(BaseModel):    
 
     class Config:
