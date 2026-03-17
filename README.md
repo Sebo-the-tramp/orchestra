@@ -1,67 +1,75 @@
-# 🎶 orchestra 🎶
+# orchestra
 
-## ATTENTION, the repo is heavily under construction ETA 1 week with first working models
+Minimal broker-worker scaffold for serving models with very little orchestration logic.
 
-ORCHESTRA is a barebone autonomous dispatch layer for serious model serving 🎼: one broker, many stupid workers, minimal maintenance, minimal downtime, and clean routing of any well-formed request to the right compute.
+## Status
 
-The design is intentionally simple 🎻. `broker.py` is the central mind that tracks queues, workers, and resources. Each worker in `./workers/` does one thing only: take assigned work, execute it, report back, and die when idle. `example_client.py` is the seed for the external interface that will eventually grow into the public-facing API layer 🎹. The goal is being able to run natively *any* model supported in huggingface, with their own implementation and speed, with orchestra being the middle layer with zero overhead. Similar to having all models on the GPU at the *same time*.
+🚧 This repo is under construction 🚧
 
-Think of the broker as a conductor with a magician's baton ✨: one precise gesture, and the right section starts playing at the right time on the right machine. You are the magician now!
+Current tested baseline:
 
-## Requirements
+- `2x NVIDIA RTX 5090`
+- `CUDA 12.8`
 
-- `uv`
+The core flow exists, but startup and worker packaging are still being cleaned up.
 
-## Install the repo
+## What It Does
+
+`orchestra` is a small ZeroMQ-based dispatcher:
+
+- `broker_core.py` accepts client requests, keeps per-model queues, and spawns workers on demand.
+- Workers live under `models/<lab>/<family>/worker.py`.
+- Model availability is declared in `models/*/config.yaml`.
+- Shared transport and image helpers live in `utils/`.
+
+The intended shape is simple:
+
+1. A client sends a request with a `model_name`.
+2. The broker queues the job.
+3. If no worker is alive for that model, the broker starts one.
+4. The worker runs the job and sends the result back through the broker.
+5. Idle workers exit on their own.
+
+## Repo Layout
+
+```text
+broker_core.py              Main broker loop
+models/*/config.yaml        Model registry and worker mapping
+models/*/*/worker.py        Worker entrypoints
+utils/transport.py          ZeroMQ worker connection helper
+utils/image_io.py           Image decoding helpers
+testsuite/                  Early test scripts
+```
+
+Current model families in the repo include `OpenGVLab/InternVL` and `facebook/sam3`.
+
+## Examples
+
+`recipes/` is the place for usage examples and runnable patterns. Much more is coming.
+
+## Setup
+
+Install the root environment:
 
 ```bash
 uv sync
 ```
 
-This installs the repo together with:
-
-- `pyzmq`
-- `tqdm`
-- `Pillow`
-
-Note: the Python import is `zmq`, but the package dependency name is `pyzmq`.
-
-## Install dependencies only
-
-If you want the environment without installing the project itself:
-
-```bash
-uv sync --no-install-project
-```
-
-## Dev tooling
-
-Install the dev tools:
+Optional dev tools:
 
 ```bash
 uv sync --group dev
-```
-
-Install the git hooks:
-
-```bash
 uv run pre-commit install
 ```
 
-This step requires the folder to be a Git repository.
+## Running
 
-Run the checks manually:
-
-```bash
-uv run pre-commit run --all-files
-```
-
-## Start orchestra
-
-From the repository root:
+Start the broker from the repository root:
 
 ```bash
-./start_orchestra.sh
+uv run python broker_core.py
 ```
 
-Raise the baton 🎶 and let the system play.
+Important: the broker currently expects each worker folder declared in `config.yaml` to have its own `.venv` and `worker.py`. If that environment is missing, worker spawning will fail fast.
+
+`start_orchestra.sh` is not a full bootstrap yet. Right now it mainly checks whether `gflowd` is up.

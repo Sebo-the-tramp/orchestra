@@ -6,3 +6,11 @@ __pycache__
 build
 dist
 *.egg-info
+
+
+# tmp for now
+models/Lightricks/**
+models/facebook/dino3/**
+
+# probably removed until better tested
+tests/**

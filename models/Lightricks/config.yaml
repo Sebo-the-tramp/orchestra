@@ -1,5 +1,0 @@
-models:
-  Lightricks/LTX-2:
-    basefolder: Lightricks/LTX-2
-    gpu_memory: 24000
-    tp: 1
