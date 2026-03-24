@@ -31,25 +31,16 @@ hide:
 
 <div class="feature-grid">
   <div class="feature-card">
-    <h3>Keep the broker stupid</h3>
-    <p>
-      The broker only validates the model name, queues the job, spawns a worker if needed,
-      and forwards the result back to the original client.
-    </p>
+    <h3>Thin Broker</h3>
+    <p>Queue work, wake workers, route replies.</p>
   </div>
   <div class="feature-card">
-    <h3>Isolate workers hard</h3>
-    <p>
-      Every worker folder is expected to own its own runtime, usually through a local
-      <code>.venv</code>, so failures stay local to one model family.
-    </p>
+    <h3>Hard Isolation</h3>
+    <p>Each family owns its runtime and dies when it goes idle.</p>
   </div>
   <div class="feature-card">
-    <h3>Stay registry-first</h3>
-    <p>
-      New capability is declared through <code>config.yaml</code>, a schema file, and a
-      single worker entrypoint rather than through a large orchestration framework.
-    </p>
+    <h3>Registry First</h3>
+    <p>Add a model with config, schema, and one worker entrypoint.</p>
   </div>
 </div>
 

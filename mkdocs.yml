@@ -12,21 +12,21 @@ theme:
   name: material
   language: en
   font:
-    text: Space Grotesk
+    text: Sora
     code: IBM Plex Mono
   palette:
-    - scheme: default
-      primary: teal
-      accent: deep orange
-      toggle:
-        icon: material/weather-night
-        name: Switch to dark mode
     - scheme: slate
-      primary: teal
-      accent: lime
+      primary: indigo
+      accent: pink
       toggle:
         icon: material/weather-sunny
         name: Switch to light mode
+    - scheme: default
+      primary: indigo
+      accent: pink
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   features:
     - navigation.tabs
     - navigation.sections
