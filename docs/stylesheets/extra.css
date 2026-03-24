@@ -1,0 +1,104 @@
+:root {
+  --orch-paper: #f6efe7;
+  --orch-ink: #182525;
+  --orch-teal: #0f7c82;
+  --orch-rust: #c35a2c;
+  --orch-border: rgba(24, 37, 37, 0.12);
+  --orch-panel: rgba(255, 255, 255, 0.72);
+}
+
+[data-md-color-scheme="slate"] {
+  --orch-paper: #0f1717;
+  --orch-ink: #ebf1f1;
+  --orch-teal: #4fc2bf;
+  --orch-rust: #ff935b;
+  --orch-border: rgba(235, 241, 241, 0.12);
+  --orch-panel: rgba(15, 23, 23, 0.72);
+}
+
+.md-typeset .hero {
+  display: grid;
+  gap: 1.5rem;
+  margin: 0 0 2rem;
+  padding: 1.6rem;
+  border: 1px solid var(--orch-border);
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(circle at top right, rgba(15, 124, 130, 0.18), transparent 32%),
+    linear-gradient(135deg, var(--orch-paper), color-mix(in srgb, var(--orch-paper) 70%, white));
+}
+
+@media screen and (min-width: 76.25em) {
+  .md-typeset .hero {
+    grid-template-columns: minmax(0, 1.4fr) minmax(18rem, 0.8fr);
+    align-items: stretch;
+  }
+}
+
+.md-typeset .hero-copy h1 {
+  margin: 0 0 0.8rem;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1.02;
+}
+
+.md-typeset .hero-kicker,
+.md-typeset .hero-panel-label {
+  margin: 0 0 0.6rem;
+  color: var(--orch-rust);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.md-typeset .hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 1rem;
+}
+
+.md-typeset .hero-panel {
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--orch-border);
+  border-radius: 1rem;
+  background: var(--orch-panel);
+  backdrop-filter: blur(12px);
+}
+
+.md-typeset .hero-list {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.md-typeset .hero-list li + li {
+  margin-top: 0.55rem;
+}
+
+.md-typeset .feature-grid {
+  display: grid;
+  gap: 1rem;
+  margin: 1.4rem 0 2rem;
+}
+
+@media screen and (min-width: 60em) {
+  .md-typeset .feature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.md-typeset .feature-card {
+  padding: 1.1rem 1.15rem;
+  border: 1px solid var(--orch-border);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--orch-panel) 82%, transparent);
+}
+
+.md-typeset .feature-card h3 {
+  margin-top: 0;
+}
+
+.md-typeset table:not([class]) {
+  border-radius: 0.9rem;
+  overflow: hidden;
+}

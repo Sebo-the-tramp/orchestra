@@ -10,6 +10,10 @@ on:
       - .github/workflows/docs.yml
   workflow_dispatch:
 
+env:
+  MKDOCS_VERSION: "1.6.1"
+  MKDOCS_MATERIAL_VERSION: "9.7.6"
+
 permissions:
   contents: read
   pages: write
@@ -38,7 +42,11 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Build docs
-        run: uv run --no-project --with mkdocs-material mkdocs build --strict
+        run: >-
+          uv run --no-project
+          --with mkdocs==${MKDOCS_VERSION}
+          --with mkdocs-material==${MKDOCS_MATERIAL_VERSION}
+          mkdocs build --strict
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -62,6 +62,22 @@ uv sync --group dev
 uv run pre-commit install
 ```
 
+## Docs
+
+Docs are deployed through GitHub Pages with `.github/workflows/docs.yml`.
+
+One-time GitHub setup:
+
+1. Push the docs workflow and `docs/` content to `main`.
+2. Open `Settings -> Pages`.
+3. Set `Build and deployment -> Source` to `GitHub Actions`.
+
+Published URL:
+
+```text
+https://sebo-the-tramp.github.io/orchestra/
+```
+
 ## Running
 
 Start the broker from the repository root:
@@ -76,6 +92,3 @@ Just run
 ```bash
 start_orchestra.sh
 ```
-
-
-## 

@@ -1,0 +1,4 @@
+models:
+  Lightricks/LTX-2.3: 
+    basefolder: Lightricks/LTX-2.3
+    gpu_memory: 32000
