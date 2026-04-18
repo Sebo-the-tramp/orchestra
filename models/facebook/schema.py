@@ -1,7 +1,6 @@
 from pydantic import BaseModel, Field
 
-class Sam3Config(BaseModel):    
-
+class Sam3Config(BaseModel):
     class Config:
         extra = "forbid"
 

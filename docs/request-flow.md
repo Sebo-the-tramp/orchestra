@@ -35,7 +35,7 @@ Workers send plain JSON payloads back to the broker. The broker forwards those p
 ```json
 {
   "type": "SUCCESS",
-  "req_id": "uuid",
+  "request_id": "uuid",
   "answer": "...",
   "model_name": "OpenGVLab/InternVL3-2B-AWQ"
 }
@@ -46,7 +46,7 @@ Workers send plain JSON payloads back to the broker. The broker forwards those p
 ```json
 {
   "type": "ERROR",
-  "req_id": "uuid",
+  "request_id": "uuid",
   "message": "Job processing failed",
   "model_name": "facebook/sam3"
 }

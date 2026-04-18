@@ -69,7 +69,7 @@ def main():
             continue
 
         last_work_time = time.monotonic()
-        req_id = None
+        request_id = None
 
         try:
             frames = socket.recv_multipart()
@@ -77,14 +77,14 @@ def main():
             if payload.get("type") == SHUTDOWN_MESSAGE_TYPE:
                 logger.info("Received %s message, shutting down", SHUTDOWN_MESSAGE_TYPE)
                 return
-            req_id = payload.get("request_id")
+            request_id = payload.get("request_id")
             response = pipe((payload.get("prompt"), decode_images(frames[2:])))
             answer = response.text if hasattr(response, "text") else str(response)
-            logger.info("Processed request_id=%s successfully", req_id)
-            socket.send_json({"type": "SUCCESS", "req_id": req_id, "answer": answer, "model_name": args.model_id})
+            logger.info("Processed request_id=%s successfully", request_id)
+            socket.send_json({"type": "SUCCESS", "request_id": request_id, "answer": answer, "model_name": args.model_id})
         except Exception:
             logger.exception("Job processing failed")
-            socket.send_json({"type": "ERROR", "req_id": req_id, "message": "Job processing failed", "model_name": args.model_id})
+            socket.send_json({"type": "ERROR", "request_id": request_id, "message": "Job processing failed", "model_name": args.model_id})
 
 
 if __name__ == "__main__":

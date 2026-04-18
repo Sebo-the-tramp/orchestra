@@ -1,4 +1,4 @@
-import os
+import ast
 import zmq
 import time
 import json
@@ -9,7 +9,7 @@ import logging
 import inspect
 import subprocess
 
-import models # import the models folder 
+import models # import the models folder
 import importlib
 
 from tqdm import tqdm
@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 ROOT = Path(__file__).resolve().parent
 WORKERS_PATH = ROOT / "models"
 ROUTER_ADDRESS = "tcp://10.10.151.14:5556"
-POLL_TIMEOUT_MS = 1000
+POLL_TIMEOUT_MS = 10
 IDLE_WORKER_TIMEOUT_SECONDS = 10.0
 BUSY_WORKER_TIMEOUT_SECONDS = 360.0
 SPAWN_TIMEOUT_SECONDS = 10.0
@@ -33,21 +33,44 @@ GBATCH_TIME = "2:00:00"
 
 LOGGER = logging.getLogger(__name__)
 
-MODELS_REGISTRY: Dict[str, Type[BaseModel]] = {}
+MODELS_REGISTRY: Dict[str, Type[BaseModel]] = {} # this should be the only thing
 MODELS_CONFIG: Dict[str, Any] = {}
 
-## Startup functions
+
+def extract_models_dict_safely(filepath: Path) -> dict:
+    """Parses a Python file safely without executing it to extract 'models_available'."""
+    with open(filepath, "r", encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=str(filepath))
+
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "models_available":
+                    try:
+                        return ast.literal_eval(node.value)
+                    except ValueError as e:
+                        raise ValueError(f"Could not parse dictionary in {filepath}. Make sure it only contains static data! Error: {e}")
+
+    return None
+
 def discover_models():
-    mods=[m for _,m,p in pkgutil.walk_packages(models.__path__,models.__name__+".") if p]
-    for m in tqdm(mods):
-        mod=importlib.import_module(f"{m}.schema"); cfg=(WORKERS_PATH/m.split(".")[-1]/"config.yaml")
-        if cfg.is_file(): MODELS_CONFIG.update((yaml.safe_load(cfg.open()) or {}).get("models",{}))
-        for n,o in inspect.getmembers(mod,inspect.isclass):
-            if issubclass(o,BaseModel) and o is not BaseModel: MODELS_REGISTRY[f"{m.split('.')[-1]}.{n}"]=o
+    models = [p for p in Path(WORKERS_PATH).rglob("worker.py") if ".venv" not in p.parts]
 
+    for worker_file in tqdm(models):
+        worker_models = extract_models_dict_safely(worker_file)
+        
+        if worker_models is None:
+            raise ValueError(
+                f"CRITICAL ERROR: The file {worker_file} is missing "
+                f"the mandatory 'models_available' dictionary!"
+            )
+        MODELS_REGISTRY.update(worker_models)
+        MODELS_CONFIG.update(worker_models)
     print("Dynamically loaded everything.")
-    print(f"Discovered models: {list(MODELS_REGISTRY.keys())}")
+    print(f"Discovered models: {list(MODELS_REGISTRY)}")
+    print(f"Discovered models config: {MODELS_CONFIG}")
 
+# discover_models_old()
 discover_models()
 
 # Classes definitions
@@ -137,15 +160,15 @@ class BrokerState:
             self.jobs_registry[job_model] = deque()
         
         self.jobs_registry[job_model].append(job)        
-        print("successfully added new job")
+        # print("successfully added new job")
     
-    def spawn_worker_for_model(self, model_name: str):
+    def spawn_worker_for_model(self, model_name: str, args_per_model: dict[str, str] | None = None) -> None:
         model_config = self.get_model_config(model_name)
         if model_config is None:
             print(f"model {model_name} not found in config")
             return
         
-        worker_id, command = build_command_for_model_bare(model_name, model_config) # bare metal without worrying about GPUs fill
+        worker_id, command = build_command_for_model_bare(model_name, model_config, args_per_model) # bare metal without worrying about GPUs fill
         # worst but might work for now since gflow doesn't allow for shared multi-gpu allocation
         # worker_id, command = build_command_for_model_gflow(model_name, model_config) 
         print(f"spawning worker for model {model_name} with command: {' '.join(command)}")
@@ -181,6 +204,10 @@ class BrokerState:
 
 ## UTILS
 
+def print_first_n_char_frames(frames: list[bytes], n: int = 3) -> None:
+    for i, frame in enumerate(frames[:n]):
+        print(f"Frame {i}: {frame[:50]}... (length: {len(frame)})")
+
 def build_command_for_model_gflow(model_name: str, model_config: dict[str, Any]) -> list[str]:
     worker_path = WORKERS_PATH / model_config["basefolder"]
     python_path = worker_path / ".venv/bin/python"
@@ -204,22 +231,23 @@ def build_command_for_model_gflow(model_name: str, model_config: dict[str, Any])
         "--model-id",
         model_name,
         "--router-connect",
-        ROUTER_ADDRESS,       
+        ROUTER_ADDRESS,
         "--worker-id",
         worker_id
     ]
 
 
-def build_command_for_model_bare(model_name: str, model_config: dict[str, Any]) -> list[str]:
+def build_command_for_model_bare(model_name: str, model_config: dict[str, Any], args_per_model: dict[str,str]| None = None) -> list[str]:
     worker_path = WORKERS_PATH / model_config["basefolder"]
     python_path = worker_path / ".venv/bin/python"
     worker_file = worker_path / "worker.py"
     gpu_memory = str(model_config.get("gpu_memory")) + "M"
+
     print(f"building command for model {model_name} with gpu memory {gpu_memory}")
     assert python_path.is_file(), python_path
     assert worker_file.is_file(), worker_file
     worker_id = str(uuid.uuid4())
-    return worker_id, [      
+    return worker_id, [
         str(python_path),
         str(worker_file),
         "--model-id",
@@ -228,36 +256,38 @@ def build_command_for_model_bare(model_name: str, model_config: dict[str, Any]) 
         ROUTER_ADDRESS,
         "--worker-id",
         worker_id
-    ]
-
-    # we need to also add optional args per model e.g.
-    #     "--tp",
-
+    ] + [item for k, v in args_per_model.items() for item in (f"--{k.replace("_", "-")}", str(v))]
 
 def send_client_payload(socket: zmq.Socket, client_id: bytes, payload: dict[str, Any]) -> None:
     socket.send_multipart([client_id, b"", json.dumps(payload).encode("utf-8")])
 
 def receive_worker_payload(frames: list[bytes]) -> tuple[str, dict[str, Any]]:
-    worker_id, raw_payload = frames
+
+    worker_id, raw_payload = frames[:2]
+
     worker_id = worker_id.decode("utf-8")
     payload = json.loads(raw_payload.decode("utf-8"))
-    return worker_id, payload    
+    return worker_id, payload
 
 
 def handle_worker_message(
     socket: zmq.Socket, state: BrokerState, frames: list[bytes], now: float
 ) -> None:
-    worker_id, raw_payload = frames
-    worker_id, payload = receive_worker_payload(frames)
     
-    type_answer = payload["type"]    
+    # print(f"Received message from worker with {len(frames)} frames at time {now}")
+    # print_first_n_char_frames(frames, n=20)
+    
+    worker_id, raw_payload = frames[:2]
+
+    worker_id, payload = receive_worker_payload(frames)
+    # print(f"Decoded payload from worker {worker_id}: {payload}")
+    type_answer = payload["type"]
 
     # to double check
     if type_answer == "HEARTBEAT":
         model_name = payload["model_name"]
         worker_id = worker_id.replace(model_name+"-", "")
-        print(f"Received heartbeat from worker {worker_id} for model {model_name}")
-        # if the model is already loaded -> crashes but is this what we want? maybe we can just ignore the heartbeat if the worker is already in the registry, but if it's not in the registry we need to add it and set it to idle
+        # print(f"Received heartbeat from worker {worker_id} for model {model_name}")        
         state.worker_registry[model_name].set_idle(worker_id)
 
     if type_answer == "SUCCESS":
@@ -266,21 +296,27 @@ def handle_worker_message(
         state.worker_registry[model_name].set_idle(worker_id)
         state.inflight_by_worker.pop(worker_id, None)
         
-        req_id = payload.get("req_id")
-        print('req_id', req_id)
-        job = state.pending_jobs.pop(req_id)
+        request_id = payload.get("request_id")
+        # print('request_id', request_id)
+        job = state.pending_jobs.pop(request_id)
         client_id = job.client_id
         
-        if client_id:            
-            socket.send_multipart([client_id, b"", raw_payload])
-            print(f"Forwarded result {req_id} to Client.")
+        if client_id:
+            payload.setdefault("profile", {})["broker_forward_started_time"] = time.time_ns()
+            raw_payload = json.dumps(payload).encode("utf-8")
+            socket.send_multipart([client_id, b"", raw_payload, *frames[2:]])
+            # print(f"Forwarded result {request_id} to Client.")
 
 
 def handle_client_message(socket: zmq.Socket, state: BrokerState, frames: list[bytes]) -> None:
     client_id = frames[0]
     payload = json.loads(frames[2].decode("utf-8"))
+    payload.setdefault("profile", {})["broker_received_request_time"] = time.time_ns()
 
     request_id = payload.get("request_id")
+
+    # print_first_n_char_frames(frames, n=20)
+    # print(f"Received message from client {client_id} with request_id {request_id} and payload {payload}")
 
     # here we need to check if the model has the correct structure!
     new_job = Job(request_id=request_id, client_id=client_id, payload=payload, images=frames[3:])
@@ -293,7 +329,7 @@ def handle_client_message(socket: zmq.Socket, state: BrokerState, frames: list[b
             client_id,
             {
                 "type": "ERROR",
-                "req_id": payload["request_id"],
+                "request_id": payload["request_id"],
                 "message": f"Unknown model '{model_name}'",
             },
         )
@@ -310,16 +346,14 @@ def receive_message(socket, state):
     frames = socket.recv_multipart()
     now = time.monotonic()
 
-    # message from worker
-    if len(frames) == 2:
-        handle_worker_message(socket, state, frames, now)
-        return
-
-    # message from client
-    if len(frames) >= 3 and frames[1] == b"":
+    if frames[1] == b"":
         handle_client_message(socket, state, frames)
         return
-    LOGGER.warning("ignored malformed message with %s frames", len(frames))
+    if frames[0] != b"":
+        handle_worker_message(socket, state, frames, now)
+        return
+    
+    # LOGGER.warning("ignored malformed message with %s frames", len(frames))
 
 
 def dispatch_jobs(socket, state: BrokerState):
@@ -330,7 +364,7 @@ def dispatch_jobs(socket, state: BrokerState):
     queues_to_remove = []
 
     for model_name, job_queue in state.jobs_registry.items():
-        print(f"model {model_name} has {len(job_queue)} jobs in the queue")
+        # print(f"model {model_name} has {len(job_queue)} jobs in the queue")
 
         if len(job_queue) == 0:
             queues_to_remove.append(model_name)
@@ -339,8 +373,10 @@ def dispatch_jobs(socket, state: BrokerState):
         # is there an active worker for this model?
         active_workers = state.worker_registry.get(model_name) # should return a list of workers better if we it as a pool with idle and busy workers        
         
-        if not active_workers:            
-            state.spawn_worker_for_model(model_name) # this should spawn a worker for the model and add it to the registry with status loading
+        if not active_workers:
+            job = job_queue[0] #TODO if there are jobs requiring different args it will fail 
+            args_per_model = job.payload.get("args_per_model", {})
+            state.spawn_worker_for_model(model_name, args_per_model) # this should spawn a worker for the model and add it to the registry with status loading
         if active_workers and len(active_workers.idle_workers) == 0:
             continue
         if active_workers and len(active_workers.wait_workers) > 0:
@@ -356,6 +392,7 @@ def dispatch_jobs(socket, state: BrokerState):
             state.inflight_by_worker[chosen_worker_id] = job
 
             # send the job to the worker
+            job.payload.setdefault("profile", {})["broker_dispatch_started_time"] = time.time_ns()
             metadata_bytes = json.dumps(job.payload).encode('utf-8')
             destination_worker_id = f"{model_name}-{chosen_worker_id}".encode()
             frames_to_send = [destination_worker_id, b"", metadata_bytes] + job.images

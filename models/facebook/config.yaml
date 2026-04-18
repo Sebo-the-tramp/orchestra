@@ -1,4 +1,12 @@
 models:
   facebook/sam3: 
     basefolder: facebook/sam3
-    gpu_memory: 4000 
+    gpu_memory: 4000
+
+  facebook/dinov3-vit7b16-pretrain-lvd1689m:
+    basefolder: facebook/dinov3
+    gpu_memory: 4000
+
+  facebook/dinov3-vits16-pretrain-lvd1689m:
+    basefolder: facebook/dinov3
+    gpu_memory: 2000

@@ -43,7 +43,7 @@ def parse_args():
 
 
 def load_model():
-    device = "cuda"    
+    device = "cuda"
     sam3_root = os.path.join(os.path.dirname(sam3.sam3.__file__))
     bpe_path = f"{sam3_root}/assets/bpe_simple_vocab_16e6.txt.gz"    
     model = build_sam3_image_model(bpe_path=bpe_path, device=device)
@@ -71,7 +71,7 @@ def single_image_multi_prompt_model_inference(processor, image: Image.Image, pro
 
     return inference_state_by_prompt
 
-def prepare_for_json(output):    
+def prepare_for_json(output):
     data = {}
     data["boxes"] = output['boxes'].cpu().tolist()
     data["masks"] = output['masks'].cpu().numpy().tolist()
@@ -79,7 +79,7 @@ def prepare_for_json(output):
     return data
 
 
-def main():    
+def main():
     args = parse_args()
     model_name = args.model_id
     processor = load_model()
@@ -98,7 +98,7 @@ def main():
             continue
 
         last_work_time = time.monotonic()
-        req_id = None
+        request_id = None
 
         try:
             frames = socket.recv_multipart()
@@ -106,17 +106,17 @@ def main():
             if payload.get("type") == SHUTDOWN_MESSAGE_TYPE:
                 logger.info("Received %s message, shutting down", SHUTDOWN_MESSAGE_TYPE)
                 return
-            req_id = payload.get("request_id")
+            request_id = payload.get("request_id")
             prompt = payload.get("prompt")
             confidence_threshold = payload.get("confidence_threshold")
             pil_images = decode_images(frames[2:])
             response = single_image_model_inference(processor, pil_images[0], prompt=prompt[0], confidence_threshold=confidence_threshold[0])                
-            clean_response = prepare_for_json(response)            
-            logger.info("Processed request_id=%s successfully", req_id)
-            socket.send_json({"type": "SUCCESS", "req_id": payload.get("request_id"), "answer": clean_response, "model_name": DEFAULT_MODEL_ID})
+            clean_response = prepare_for_json(response)
+            logger.info("Processed request_id=%s successfully", request_id)
+            socket.send_json({"type": "SUCCESS", "request_id": payload.get("request_id"), "answer": clean_response, "model_name": DEFAULT_MODEL_ID})
         except Exception:
             logger.exception("Job processing failed")
-            socket.send_json({"type": "ERROR", "req_id": req_id, "message": "Job processing failed", "model_name": DEFAULT_MODEL_ID})
+            socket.send_json({"type": "ERROR", "request_id": request_id, "message": "Job processing failed", "model_name": DEFAULT_MODEL_ID})
 
 
 if __name__ == "__main__":

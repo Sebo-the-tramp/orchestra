@@ -54,13 +54,13 @@ Heartbeat:
 Success:
 
 ```json
-{"type": "SUCCESS", "req_id": "<request-id>", "answer": "..."}
+{"type": "SUCCESS", "request_id": "<request-id>", "answer": "..."}
 ```
 
 Error:
 
 ```json
-{"type": "ERROR", "req_id": "<request-id>", "message": "..."}
+{"type": "ERROR", "request_id": "<request-id>", "message": "..."}
 ```
 
 ### Broker -> worker
