@@ -26,6 +26,7 @@ from orchestra.runtime import build_worker_command, compatible, env_status
 
 POLL_TIMEOUT_MS = 10
 IDLE_PRESSURE_EVICT_SECONDS = 3.0
+IDLE_NO_QUEUE_EVICT_SECONDS = 3.0
 STOPPING_WORKER_GRACE_SECONDS = 10.0
 LOGGER = logging.getLogger(__name__)
 
@@ -260,7 +261,7 @@ def handle_worker_message(socket: zmq.Socket, state: BrokerState, frames: list[b
             return
         emit("worker_heartbeat", worker_id=worker_id, model=model_name, key=key)
         set_worker_idle(worker)
-        state.worker_registry[key].set_idle(worker_id)
+        state.worker_registry.setdefault(key, WorkerPool()).set_idle(worker_id)
         return
 
     if message_type in {"SUCCESS", "ERROR"} and key is not None:
@@ -313,8 +314,15 @@ def receive_message(socket: zmq.Socket, state: BrokerState) -> None:
     handle_worker_message(socket, state, frames)
 
 
-def shutdown_idle_worker(socket: zmq.Socket, state: BrokerState, worker_id: str) -> None:
+def shutdown_idle_worker(
+    socket: zmq.Socket,
+    state: BrokerState,
+    worker_id: str,
+    reason: str,
+) -> None:
     worker = state.worker_map[worker_id]
+    if worker.status == WorkerStatus.STOPPING:
+        return
     pool = state.worker_registry.get(worker.key)
     if pool is not None:
         pool.discard_worker_id(worker_id)
@@ -329,7 +337,7 @@ def shutdown_idle_worker(socket: zmq.Socket, state: BrokerState, worker_id: str)
         worker_id=worker_id,
         model=worker.model_name,
         key=worker.key,
-        reason="queued_model_pressure",
+        reason=reason,
     )
     append_job_event(
         "worker_shutdown",
@@ -337,7 +345,7 @@ def shutdown_idle_worker(socket: zmq.Socket, state: BrokerState, worker_id: str)
         worker_id=worker_id,
         model=worker.model_name,
         key=worker.key,
-        reason="queued_model_pressure",
+        reason=reason,
     )
 
 
@@ -354,11 +362,33 @@ def idle_pressure_blocks_spawn(socket: zmq.Socket, state: BrokerState, target_ke
             continue
         blocked = True
         if now - worker.idle_since >= IDLE_PRESSURE_EVICT_SECONDS:
-            shutdown_idle_worker(socket, state, worker_id)
+            shutdown_idle_worker(socket, state, worker_id, "queued_model_pressure")
     return blocked
 
 
+def has_stopping_worker_for_key(state: BrokerState, target_key: str) -> bool:
+    return any(
+        worker.key == target_key and worker.status == WorkerStatus.STOPPING
+        for worker in state.worker_map.values()
+    )
+
+
+def evict_idle_workers_without_work(socket: zmq.Socket, state: BrokerState) -> None:
+    now = time.monotonic()
+    active_queue_keys = {
+        key for key, job_queue in state.jobs_registry.items() if len(job_queue) > 0
+    }
+    for worker_id, worker in list(state.worker_map.items()):
+        if worker.status != WorkerStatus.IDLE or worker.idle_since is None:
+            continue
+        if worker.key in active_queue_keys:
+            continue
+        if now - worker.idle_since >= IDLE_NO_QUEUE_EVICT_SECONDS:
+            shutdown_idle_worker(socket, state, worker_id, "idle_no_queue")
+
+
 def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
+    evict_idle_workers_without_work(socket, state)
     queues_to_remove = []
     for key, job_queue in state.jobs_registry.items():
         if not job_queue:
@@ -370,6 +400,8 @@ def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
             del state.worker_registry[key]
             pool = None
         if pool is None:
+            if has_stopping_worker_for_key(state, key):
+                continue
             if idle_pressure_blocks_spawn(socket, state, key):
                 continue
             state.spawn_worker_for_job(job_queue[0])

@@ -18,7 +18,7 @@ from orchestra.model_store import model_file_path  # noqa: E402
 from orchestra.registry import load_registry  # noqa: E402
 
 POLL_TIMEOUT_MS = 1000
-IDLE_SHUTDOWN_SECONDS = 60
+IDLE_SHUTDOWN_SECONDS = 3
 STARTUP_SECONDS = 5
 STARTUP_TIMEOUT_SECONDS = 180
 DEFAULT_LLAMA_DIR = "/home/kilolab/Documents/shared/llama.cpp"
@@ -124,7 +124,10 @@ def wait_for_http(port: str, path: str, timeout_seconds: int, process: subproces
 def stop_process(process: subprocess.Popen) -> None:
     if process.poll() is None:
         os.killpg(process.pid, signal.SIGTERM)
-        process.wait(timeout=10)
+        time.sleep(2)
+    if process.poll() is None:
+        os.killpg(process.pid, signal.SIGKILL)
+    process.wait()
 
 
 def completion(port: str, alias: str, payload: dict[str, Any]) -> str:

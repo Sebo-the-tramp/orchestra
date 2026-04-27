@@ -119,6 +119,7 @@ def test_idle_worker_is_evicted_under_queued_model_pressure() -> None:
         Worker,
         WorkerPool,
         WorkerStatus,
+        has_stopping_worker_for_key,
         idle_pressure_blocks_spawn,
     )
 
@@ -152,6 +153,29 @@ def test_idle_worker_is_evicted_under_queued_model_pressure() -> None:
     assert state.worker_map["old-worker"].status == WorkerStatus.STOPPING
     assert not state.worker_registry["old-key"].idle_workers
     assert socket.frames[0][0] == b"old-model-old-worker"
+    assert has_stopping_worker_for_key(state, "old-key")
+    assert not has_stopping_worker_for_key(state, "new-key")
+
+
+def test_stopping_worker_blocks_same_key_respawn() -> None:
+    import time
+
+    from broker_core import BrokerState, Worker, WorkerStatus, has_stopping_worker_for_key
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+    state = BrokerState()
+    state.worker_map["worker"] = Worker(
+        key="same-key",
+        model_name="model",
+        process=FakeProcess(),
+        started_at=time.monotonic(),
+        status=WorkerStatus.STOPPING,
+        stopping_since=time.monotonic(),
+    )
+    assert has_stopping_worker_for_key(state, "same-key")
 
 
 def test_text_generation_routing_returns_candidates() -> None:
