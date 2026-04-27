@@ -30,7 +30,7 @@ def model_ready(
         return False, "incompatible runtime"
     free_vram = max((gpu.free_mb for gpu in hardware.gpus), default=0)
     if hardware.gpus and free_vram < model.min_vram_mb:
-        return False, "insufficient VRAM"
+        return True, "ready: VRAM below advisory estimate"
     return True, "ready"
 
 
@@ -48,8 +48,6 @@ def schedule_plan(
             action = "keep_warm"
         elif ready:
             action = "available"
-        elif reason == "insufficient VRAM":
-            action = "evict_or_reject"
         else:
             action = "blocked"
         decisions.append(ScheduleDecision(model.name, action, reason, model.min_vram_mb))

@@ -236,7 +236,7 @@ def dry_run() -> None:
         elif not compatible(runtime, hardware):
             result = "blocked: incompatible runtime"
         elif hardware.gpus and free_vram < model.min_vram_mb:
-            result = "blocked: insufficient VRAM"
+            result = "ready: VRAM below advisory estimate"
         elif not worker_path.is_file():
             result = "blocked: worker missing"
         table.add_row(
@@ -493,14 +493,18 @@ def models_status() -> None:
     for model in registry.models.values():
         runtime = runtime_for_model(registry, model)
         free_vram = max((gpu.free_mb for gpu in hardware.gpus), default=0)
-        enough_vram = not hardware.gpus or free_vram >= model.min_vram_mb
+        vram_advisory = not hardware.gpus or free_vram >= model.min_vram_mb
+        runtime_ok = compatible(runtime, hardware)
+        compatible_text = _compatible_text(runtime_ok)
+        if runtime_ok and not vram_advisory:
+            compatible_text = "yes, VRAM advisory low"
         table.add_row(
             model.name,
             model.default_engine,
             model.default_runtime,
             model_status(config, model),
             env_status(runtime),
-            _compatible_text(compatible(runtime, hardware) and enough_vram),
+            compatible_text,
             str(model_file_path(config, model)),
         )
     console.print(table)

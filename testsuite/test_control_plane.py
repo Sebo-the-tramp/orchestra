@@ -3,7 +3,7 @@ from orchestra.hardware import detect_hardware
 from orchestra.nodes import local_node_status
 from orchestra.profiles import architecture_profile, default_llm_engine_runtime, setup_plan
 from orchestra.registry import engine_for_model, load_registry, model_by_name, runtime_for_model
-from orchestra.routing import candidates_for_task, choose_model
+from orchestra.routing import candidate_status, candidates_for_task, choose_model
 from orchestra.runtime import build_worker_command, env_status
 from orchestra.scheduler import schedule_plan
 from orchestra.snapshot import snapshot_data
@@ -83,6 +83,29 @@ def test_model_aliases_and_worker_bool_args() -> None:
     assert model.name == "unsloth/Qwen3.5-9B-UD-Q4_K_XL"
     assert "--isolate-gpu-devices" in command
     assert "True" not in command
+
+
+def test_vram_is_advisory_not_a_hard_route_block() -> None:
+    from orchestra.hardware import Gpu, HardwareReport
+
+    config = load_config()
+    registry = load_registry()
+    model = model_by_name(registry, "qwen3.6-35b")
+    hardware = HardwareReport(
+        os="linux",
+        machine="x86_64",
+        python="3.12",
+        uv=True,
+        cuda=True,
+        rocm=False,
+        mlx=False,
+        gpus=[Gpu(vendor="nvidia", name="small", total_mb=16000, free_mb=16000)],
+    )
+    candidate = candidates_for_task(config, registry, hardware, "text_generation")[0]
+    direct = candidate_status(config, registry, hardware, model)
+    assert direct.ready
+    assert "advisory" in direct.reason
+    assert candidate.ready
 
 
 def test_text_generation_routing_returns_candidates() -> None:
@@ -176,7 +199,10 @@ def test_broker_dummy_end_to_end() -> None:
     import zmq
 
     address = f"tcp://127.0.0.1:{free_port()}"
-    env = os.environ | {"ORCHESTRA_BROKER_ADDRESS": address}
+    env = os.environ | {
+        "ORCHESTRA_BROKER_ADDRESS": address,
+        "ORCHESTRA_BROKER_BIND_ADDRESS": address,
+    }
     process = subprocess.Popen(
         [sys.executable, "broker_core.py"],
         cwd=os.getcwd(),

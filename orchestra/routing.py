@@ -28,7 +28,7 @@ def candidate_status(
     if not compatible(runtime, hardware):
         return RouteCandidate(model, False, "incompatible runtime")
     if hardware.gpus and max(gpu.free_mb for gpu in hardware.gpus) < model.min_vram_mb:
-        return RouteCandidate(model, False, "insufficient VRAM")
+        return RouteCandidate(model, True, "ready: VRAM below advisory estimate")
     return RouteCandidate(model, True, "ready")
 
 

@@ -207,14 +207,15 @@ def validate_job(payload: dict[str, Any]) -> dict[str, Any] | None:
             f"Runtime '{runtime.name}' is not compatible",
             model_name,
         )
-    if hardware.gpus and max(gpu.free_mb for gpu in hardware.gpus) < model.min_vram_mb:
-        emit("request_rejected", code="INSUFFICIENT_VRAM", model=model_name)
-        return error_payload(
-            request_id,
-            "INSUFFICIENT_VRAM",
-            f"Model '{model_name}' needs {model.min_vram_mb} MB",
-            model_name,
-        )
+    if hardware.gpus:
+        free_vram = max(gpu.free_mb for gpu in hardware.gpus)
+        if free_vram < model.min_vram_mb:
+            emit(
+                "request_vram_warning",
+                model=model.name,
+                free_vram_mb=free_vram,
+                advisory_min_vram_mb=model.min_vram_mb,
+            )
     return None
 
 
