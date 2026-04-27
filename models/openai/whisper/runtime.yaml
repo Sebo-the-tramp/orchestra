@@ -1,0 +1,26 @@
+runtimes:
+  whisper_transformers_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      torch: "2.8.0"
+      transformers: "*"
+      accelerate: "*"
+      librosa: "*"
+      soundfile: "*"
+      pyzmq: "*"
+    index_url: https://download.pytorch.org/whl/cu128
+  whisper_transformers_cpu:
+    python: "3.12"
+    accelerator: cpu
+    packages:
+      torch: "*"
+      transformers: "*"
+      accelerate: "*"
+      librosa: "*"
+      soundfile: "*"
+      pyzmq: "*"
+engines:
+  whisper_transformers:
+    install: uv
+    entrypoint: worker.py

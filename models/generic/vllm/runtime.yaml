@@ -1,0 +1,12 @@
+runtimes:
+  vllm_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      vllm: "*"
+      pyzmq: "*"
+      pydantic: "*"
+engines:
+  vllm:
+    install: uv
+    entrypoint: worker.py

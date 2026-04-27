@@ -1,431 +1,355 @@
-import ast
-import zmq
-import time
 import json
-import yaml
-import uuid
-import pkgutil
 import logging
-import inspect
 import subprocess
-
-import models # import the models folder
-import importlib
-
-from tqdm import tqdm
+import time
+import uuid
+from collections import deque
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
-from pathlib import Path
-from collections import deque
-from pydantic import BaseModel
-from dataclasses import dataclass, field
 
-# Constants
-ROOT = Path(__file__).resolve().parent
-WORKERS_PATH = ROOT / "models"
-ROUTER_ADDRESS = "tcp://10.10.151.14:5556"
+import zmq
+
+from orchestra.config import load_config
+from orchestra.hardware import detect_hardware
+from orchestra.job_store import append_job_event
+from orchestra.metrics import emit
+from orchestra.model_store import model_status
+from orchestra.registry import (
+    ModelSpec,
+    engine_for_model,
+    load_registry,
+    model_by_name,
+    runtime_for_model,
+)
+from orchestra.runtime import build_worker_command, compatible, env_status
+
 POLL_TIMEOUT_MS = 10
-IDLE_WORKER_TIMEOUT_SECONDS = 10.0
-BUSY_WORKER_TIMEOUT_SECONDS = 360.0
-SPAWN_TIMEOUT_SECONDS = 10.0
-GBATCH_GPUS = "2"
-GBATCH_TIME = "2:00:00"
-
 LOGGER = logging.getLogger(__name__)
 
-MODELS_REGISTRY: Dict[str, Type[BaseModel]] = {} # this should be the only thing
-MODELS_CONFIG: Dict[str, Any] = {}
-
-
-def extract_models_dict_safely(filepath: Path) -> dict:
-    """Parses a Python file safely without executing it to extract 'models_available'."""
-    with open(filepath, "r", encoding="utf-8") as f:
-        tree = ast.parse(f.read(), filename=str(filepath))
-
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "models_available":
-                    try:
-                        return ast.literal_eval(node.value)
-                    except ValueError as e:
-                        raise ValueError(f"Could not parse dictionary in {filepath}. Make sure it only contains static data! Error: {e}")
-
-    return None
-
-def discover_models():
-    models = [p for p in Path(WORKERS_PATH).rglob("worker.py") if ".venv" not in p.parts]
-
-    for worker_file in tqdm(models):
-        worker_models = extract_models_dict_safely(worker_file)
-        
-        if worker_models is None:
-            raise ValueError(
-                f"CRITICAL ERROR: The file {worker_file} is missing "
-                f"the mandatory 'models_available' dictionary!"
-            )
-        MODELS_REGISTRY.update(worker_models)
-        MODELS_CONFIG.update(worker_models)
-    print("Dynamically loaded everything.")
-    print(f"Discovered models: {list(MODELS_REGISTRY)}")
-    print(f"Discovered models config: {MODELS_CONFIG}")
-
-# discover_models_old()
-discover_models()
-
-# Classes definitions
-## Job definition
-@dataclass(slots=True)
-class Payload:
-    model_name: str
-    config: dict[str, Any]
 
 @dataclass(slots=True)
 class Job:
     request_id: str
     client_id: bytes
-    payload: Payload
+    payload: dict[str, Any]
     images: list[bytes] = field(default_factory=list)
 
 
-## Worker definition
 class WorkerStatus(Enum):
     IDLE = "IDLE"
-    BUSY = "BUSY"    
+    BUSY = "BUSY"
     WAITING = "WAITING"
+
 
 @dataclass(slots=True)
 class Worker:
+    key: str
     model_name: str
-    process: Any
+    process: subprocess.Popen[Any]
     started_at: float
     status: WorkerStatus = WorkerStatus.WAITING
-    process: Any
 
 
 @dataclass(slots=True)
 class WorkerPool:
-    busy_workers: set[bytes] = field(default_factory=set)
-    idle_workers: set[bytes] = field(default_factory=set)
-    wait_workers: set[bytes] = field(default_factory=set)
+    busy_workers: set[str] = field(default_factory=set)
+    idle_workers: set[str] = field(default_factory=set)
+    wait_workers: set[str] = field(default_factory=set)
 
-    def add_waiting_worker(self, worker_id: bytes):
+    def add_waiting_worker(self, worker_id: str) -> None:
         self.wait_workers.add(worker_id)
 
-    def set_idle(self, worker_id: bytes):
+    def set_idle(self, worker_id: str) -> None:
         self.wait_workers.discard(worker_id)
         self.busy_workers.discard(worker_id)
         self.idle_workers.add(worker_id)
 
-    def set_busy(self, worker_id: bytes):
+    def set_busy(self, worker_id: str) -> None:
         self.wait_workers.discard(worker_id)
         self.idle_workers.discard(worker_id)
         self.busy_workers.add(worker_id)
 
-    @property
-    def total_count(self) -> int:
-        return len(self.idle_workers) + len(self.busy_workers) + len(self.wait_workers)
-
-    def discard_worker_id(self, worker_id):
+    def discard_worker_id(self, worker_id: str) -> None:
         self.busy_workers.discard(worker_id)
         self.idle_workers.discard(worker_id)
         self.wait_workers.discard(worker_id)
 
-    def is_empty(self):
-        return (len(self.busy_workers) + len(self.idle_workers) + len(self.wait_workers)) == 0
+    def is_empty(self) -> bool:
+        return len(self.busy_workers) + len(self.idle_workers) + len(self.wait_workers) == 0
 
 
-# Broker state definition
 @dataclass(slots=True)
 class BrokerState:
     worker_registry: dict[str, WorkerPool] = field(default_factory=dict)
     worker_map: dict[str, Worker] = field(default_factory=dict)
-    # job_queue: deque[Job] = field(default_factory=deque)
     jobs_registry: dict[str, deque[Job]] = field(default_factory=dict)
-    pending_jobs: dict[str, Job] = field(default_factory=dict) # request_id -> Job
+    pending_jobs: dict[str, Job] = field(default_factory=dict)
     inflight_by_worker: dict[str, Job] = field(default_factory=dict)
-    
-    def has_active_worker_by_model(self, model_name: str) -> bool:
-        """Checks if a worker exists and is actually populated."""
-        pool = self.worker_registry.get(model_name)
-        return pool is not None and not pool.is_empty()
 
-    def get_model_config(self, model_name: str) -> dict[str, Any] | None:
-        return MODELS_CONFIG.get(model_name)
+    def enqueue_job(self, job: Job) -> None:
+        key = worker_key(job.payload)
+        self.jobs_registry.setdefault(key, deque()).append(job)
 
-    def enqueue_job(self, job):  
-        job_model = job.payload["model_name"]
-
-        if job_model not in self.jobs_registry:
-            self.jobs_registry[job_model] = deque()
-        
-        self.jobs_registry[job_model].append(job)        
-        # print("successfully added new job")
-    
-    def spawn_worker_for_model(self, model_name: str, args_per_model: dict[str, str] | None = None) -> None:
-        model_config = self.get_model_config(model_name)
-        if model_config is None:
-            print(f"model {model_name} not found in config")
-            return
-        
-        worker_id, command = build_command_for_model_bare(model_name, model_config, args_per_model) # bare metal without worrying about GPUs fill
-        # worst but might work for now since gflow doesn't allow for shared multi-gpu allocation
-        # worker_id, command = build_command_for_model_gflow(model_name, model_config) 
-        print(f"spawning worker for model {model_name} with command: {' '.join(command)}")
+    def spawn_worker_for_job(self, job: Job) -> None:
+        model = model_for_payload(job.payload)
+        registry = load_registry()
+        config = load_config()
+        runtime = runtime_for_model(registry, model, job.payload.get("runtime"))
+        engine = engine_for_model(registry, model, job.payload.get("engine"))
+        worker_id = str(uuid.uuid4())
+        command = build_worker_command(
+            model=model,
+            runtime=runtime,
+            engine=engine,
+            router_address=config.broker_address,
+            worker_id=worker_id,
+            args_per_model=job.payload.get("args_per_model", {}),
+        )
+        LOGGER.info("spawning worker key=%s command=%s", worker_key(job.payload), " ".join(command))
+        emit("worker_spawn", key=worker_key(job.payload), model=model.name, command=command)
         process = subprocess.Popen(command)
-
-        new_worker = Worker(model_name=model_name, started_at=time.monotonic_ns(), status=WorkerStatus.WAITING, process=process)
-        self.worker_map[worker_id] = new_worker    
-
-        if self.worker_registry.get(model_name) is None:
-            self.worker_registry[model_name] = WorkerPool()
-        
-        print(f"worker for model {model_name} spawned with id {worker_id} and process id {process.pid}")
-        self.worker_registry[model_name].add_waiting_worker(worker_id) # we can use the process id as the worker id for now, but we need to make sure that when the worker is
-
-        # when does it become idle -> how to deal with difference from WAITING maybe there is no difference
-
-    def remove_worker_id(worker_id, worker_model):
-        worker_map[worker_model].remove_worker_id(worker_id)
-        # remove entirely if the WorkerPool() is empty
-        if worker_map[worker_model].is_empty():
-            del worker_map[worker_model]
-
-    #TODO maybe do it better here as full function instead of the schifo there    
-    # def assign_job_to_worker(self, model_name: str, worker_id: bytes, job_to_send: Job):
-
-    #     # remove the job from the queue
-    #     # job_to_send = self.jobs_registry[model_name].popleft() # remove the job from the queues        
-    #     # append it to known registry to be able to forward the response to the correct client when the worker sends back the result
-    #     self.pending_jobs[job_to_send.request_id] = job_to_send
-    #     print(f"assigned job {job_to_send.request_id} to worker {worker_id} for model {model_name}")
-
-# the queue shuould have a maximum number of jobs it can have I think right?
-
-## UTILS
-
-def print_first_n_char_frames(frames: list[bytes], n: int = 3) -> None:
-    for i, frame in enumerate(frames[:n]):
-        print(f"Frame {i}: {frame[:50]}... (length: {len(frame)})")
-
-def build_command_for_model_gflow(model_name: str, model_config: dict[str, Any]) -> list[str]:
-    worker_path = WORKERS_PATH / model_config["basefolder"]
-    python_path = worker_path / ".venv/bin/python"
-    worker_file = worker_path / "worker.py"
-    gpu_memory = str(model_config.get("gpu_memory")) + "M"
-    print(f"building command for model {model_name} with gpu memory {gpu_memory}")
-    assert python_path.is_file(), python_path
-    assert worker_file.is_file(), worker_file
-    worker_id = str(uuid.uuid4())
-    return worker_id, [
-        "gbatch",
-        "--gpus",
-        GBATCH_GPUS,
-        "--shared",
-        "--gpu-memory",
-        gpu_memory,
-        "--time",
-        GBATCH_TIME,
-        str(python_path),
-        str(worker_file),
-        "--model-id",
-        model_name,
-        "--router-connect",
-        ROUTER_ADDRESS,
-        "--worker-id",
-        worker_id
-    ]
+        key = worker_key(job.payload)
+        self.worker_map[worker_id] = Worker(
+            key=key,
+            model_name=model.name,
+            process=process,
+            started_at=time.monotonic(),
+        )
+        self.worker_registry.setdefault(key, WorkerPool()).add_waiting_worker(worker_id)
 
 
-def build_command_for_model_bare(model_name: str, model_config: dict[str, Any], args_per_model: dict[str,str]| None = None) -> list[str]:
-    worker_path = WORKERS_PATH / model_config["basefolder"]
-    python_path = worker_path / ".venv/bin/python"
-    worker_file = worker_path / "worker.py"
-    gpu_memory = str(model_config.get("gpu_memory")) + "M"
+def worker_key(payload: dict[str, Any]) -> str:
+    model = payload["model_name"]
+    spec = model_by_name(load_registry(), model)
+    engine = payload.get("engine", spec.default_engine)
+    runtime = payload.get("runtime", spec.default_runtime)
+    args = json.dumps(payload.get("args_per_model", {}), sort_keys=True)
+    return f"{model}|{engine}|{runtime}|{args}"
 
-    print(f"building command for model {model_name} with gpu memory {gpu_memory}")
-    assert python_path.is_file(), python_path
-    assert worker_file.is_file(), worker_file
-    worker_id = str(uuid.uuid4())
-    return worker_id, [
-        str(python_path),
-        str(worker_file),
-        "--model-id",
-        model_name,
-        "--router-connect",
-        ROUTER_ADDRESS,
-        "--worker-id",
-        worker_id
-    ] + [item for k, v in args_per_model.items() for item in (f"--{k.replace("_", "-")}", str(v))]
+
+def model_for_payload(payload: dict[str, Any]) -> ModelSpec:
+    return model_by_name(load_registry(), payload["model_name"])
+
+
+def error_payload(
+    request_id: str | None,
+    code: str,
+    message: str,
+    model_name: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": "ERROR",
+        "request_id": request_id,
+        "code": code,
+        "message": message,
+    }
+    if model_name is not None:
+        payload["model_name"] = model_name
+    return payload
+
 
 def send_client_payload(socket: zmq.Socket, client_id: bytes, payload: dict[str, Any]) -> None:
     socket.send_multipart([client_id, b"", json.dumps(payload).encode("utf-8")])
 
+
+def validate_job(payload: dict[str, Any]) -> dict[str, Any] | None:
+    request_id = payload.get("request_id")
+    model_name = payload.get("model_name")
+    registry = load_registry()
+    config = load_config()
+    matches = [
+        model
+        for model in registry.models.values()
+        if model.name == model_name or model_name in model.aliases
+    ]
+    if not matches:
+        emit("request_rejected", code="UNKNOWN_MODEL", model=model_name)
+        return error_payload(
+            request_id,
+            "UNKNOWN_MODEL",
+            f"Unknown model '{model_name}'",
+            model_name,
+        )
+
+    model = matches[0]
+    payload["model_name"] = model.name
+    runtime = runtime_for_model(registry, model, payload.get("runtime"))
+    engine_for_model(registry, model, payload.get("engine"))
+    hardware = detect_hardware()
+
+    if model_status(config, model) != "downloaded":
+        emit("request_rejected", code="MODEL_NOT_DOWNLOADED", model=model_name)
+        return error_payload(
+            request_id,
+            "MODEL_NOT_DOWNLOADED",
+            f"Model '{model_name}' is not downloaded",
+            model_name,
+        )
+    if env_status(runtime) != "ready":
+        emit("request_rejected", code="ENV_NOT_READY", model=model_name, runtime=runtime.name)
+        return error_payload(
+            request_id,
+            "ENV_NOT_READY",
+            f"Runtime '{runtime.name}' is not ready",
+            model_name,
+        )
+    if not compatible(runtime, hardware):
+        emit(
+            "request_rejected",
+            code="INCOMPATIBLE_RUNTIME",
+            model=model_name,
+            runtime=runtime.name,
+        )
+        return error_payload(
+            request_id,
+            "INCOMPATIBLE_RUNTIME",
+            f"Runtime '{runtime.name}' is not compatible",
+            model_name,
+        )
+    if hardware.gpus and max(gpu.free_mb for gpu in hardware.gpus) < model.min_vram_mb:
+        emit("request_rejected", code="INSUFFICIENT_VRAM", model=model_name)
+        return error_payload(
+            request_id,
+            "INSUFFICIENT_VRAM",
+            f"Model '{model_name}' needs {model.min_vram_mb} MB",
+            model_name,
+        )
+    return None
+
+
 def receive_worker_payload(frames: list[bytes]) -> tuple[str, dict[str, Any]]:
-
-    worker_id, raw_payload = frames[:2]
-
-    worker_id = worker_id.decode("utf-8")
-    payload = json.loads(raw_payload.decode("utf-8"))
-    return worker_id, payload
+    identity = frames[0].decode("utf-8")
+    payload = json.loads(frames[1].decode("utf-8"))
+    return identity, payload
 
 
-def handle_worker_message(
-    socket: zmq.Socket, state: BrokerState, frames: list[bytes], now: float
-) -> None:
-    
-    # print(f"Received message from worker with {len(frames)} frames at time {now}")
-    # print_first_n_char_frames(frames, n=20)
-    
-    worker_id, raw_payload = frames[:2]
+def worker_uuid(identity: str, model_name: str) -> str:
+    return identity.replace(f"{model_name}-", "", 1)
 
-    worker_id, payload = receive_worker_payload(frames)
-    # print(f"Decoded payload from worker {worker_id}: {payload}")
-    type_answer = payload["type"]
 
-    # to double check
-    if type_answer == "HEARTBEAT":
-        model_name = payload["model_name"]
-        worker_id = worker_id.replace(model_name+"-", "")
-        # print(f"Received heartbeat from worker {worker_id} for model {model_name}")        
-        state.worker_registry[model_name].set_idle(worker_id)
+def handle_worker_message(socket: zmq.Socket, state: BrokerState, frames: list[bytes]) -> None:
+    identity, payload = receive_worker_payload(frames)
+    message_type = payload["type"]
+    model_name = payload.get("model_name")
+    worker_id = worker_uuid(identity, model_name)
+    worker = state.worker_map.get(worker_id)
+    key = worker.key if worker is not None else None
 
-    if type_answer == "SUCCESS":
-        model_name = payload["model_name"]
-        worker_id = worker_id.replace(model_name+"-", "")
-        state.worker_registry[model_name].set_idle(worker_id)
-        state.inflight_by_worker.pop(worker_id, None)
-        
+    if message_type == "HEARTBEAT" and key is not None:
+        emit("worker_heartbeat", worker_id=worker_id, model=model_name, key=key)
+        state.worker_registry[key].set_idle(worker_id)
+        return
+
+    if message_type in {"SUCCESS", "ERROR"} and key is not None:
+        emit("worker_response", type=message_type, worker_id=worker_id, model=model_name, key=key)
+        append_job_event(
+            "completed",
+            payload.get("request_id"),
+            worker_id=worker_id,
+            model=model_name,
+            type=message_type,
+        )
+        state.worker_registry[key].set_idle(worker_id)
+        job = state.inflight_by_worker.pop(worker_id, None)
         request_id = payload.get("request_id")
-        # print('request_id', request_id)
-        job = state.pending_jobs.pop(request_id)
-        client_id = job.client_id
-        
-        if client_id:
-            payload.setdefault("profile", {})["broker_forward_started_time"] = time.time_ns()
-            raw_payload = json.dumps(payload).encode("utf-8")
-            socket.send_multipart([client_id, b"", raw_payload, *frames[2:]])
-            # print(f"Forwarded result {request_id} to Client.")
+        job = job or state.pending_jobs.pop(request_id)
+        state.pending_jobs.pop(request_id, None)
+        payload.setdefault("profile", {})["broker_forward_started_time"] = time.time_ns()
+        socket.send_multipart(
+            [job.client_id, b"", json.dumps(payload).encode("utf-8"), *frames[2:]]
+        )
 
 
 def handle_client_message(socket: zmq.Socket, state: BrokerState, frames: list[bytes]) -> None:
     client_id = frames[0]
     payload = json.loads(frames[2].decode("utf-8"))
     payload.setdefault("profile", {})["broker_received_request_time"] = time.time_ns()
-
-    request_id = payload.get("request_id")
-
-    # print_first_n_char_frames(frames, n=20)
-    # print(f"Received message from client {client_id} with request_id {request_id} and payload {payload}")
-
-    # here we need to check if the model has the correct structure!
-    new_job = Job(request_id=request_id, client_id=client_id, payload=payload, images=frames[3:])
-
-    model_name = new_job.payload["model_name"]
-    model_path_config = state.get_model_config(model_name) 
-    if model_path_config is None:
-        send_client_payload(
-            socket,
-            client_id,
-            {
-                "type": "ERROR",
-                "request_id": payload["request_id"],
-                "message": f"Unknown model '{model_name}'",
-            },
+    error = validate_job(payload)
+    if error is not None:
+        append_job_event(
+            "rejected",
+            payload.get("request_id"),
+            model=payload.get("model_name"),
+            code=error["code"],
         )
-        LOGGER.warning("rejected request_id=%s unknown model=%s", payload["request_id"], model_name)
+        send_client_payload(socket, client_id, error)
         return
+    emit("request_queued", request_id=payload["request_id"], model=payload["model_name"])
+    append_job_event("queued", payload["request_id"], model=payload["model_name"])
+    state.enqueue_job(Job(payload["request_id"], client_id, payload, frames[3:]))
 
-    state.enqueue_job(new_job)
 
-
-def receive_message(socket, state):
+def receive_message(socket: zmq.Socket, state: BrokerState) -> None:
     if not socket.poll(timeout=POLL_TIMEOUT_MS):
         return
-
     frames = socket.recv_multipart()
-    now = time.monotonic()
-
-    if frames[1] == b"":
+    if len(frames) >= 3 and frames[1] == b"":
         handle_client_message(socket, state, frames)
         return
-    if frames[0] != b"":
-        handle_worker_message(socket, state, frames, now)
-        return
-    
-    # LOGGER.warning("ignored malformed message with %s frames", len(frames))
+    handle_worker_message(socket, state, frames)
 
 
-def dispatch_jobs(socket, state: BrokerState):
-
-    # even this one runs once every 100 milliseconds
-
-    # read first job in the list
+def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
     queues_to_remove = []
-
-    for model_name, job_queue in state.jobs_registry.items():
-        # print(f"model {model_name} has {len(job_queue)} jobs in the queue")
-
-        if len(job_queue) == 0:
-            queues_to_remove.append(model_name)
+    for key, job_queue in state.jobs_registry.items():
+        if not job_queue:
+            queues_to_remove.append(key)
             continue
 
-        # is there an active worker for this model?
-        active_workers = state.worker_registry.get(model_name) # should return a list of workers better if we it as a pool with idle and busy workers        
-        
-        if not active_workers:
-            job = job_queue[0] #TODO if there are jobs requiring different args it will fail 
-            args_per_model = job.payload.get("args_per_model", {})
-            state.spawn_worker_for_model(model_name, args_per_model) # this should spawn a worker for the model and add it to the registry with status loading
-        if active_workers and len(active_workers.idle_workers) == 0:
+        pool = state.worker_registry.get(key)
+        if pool is None:
+            state.spawn_worker_for_job(job_queue[0])
             continue
-        if active_workers and len(active_workers.wait_workers) > 0:
+        if pool.wait_workers or not pool.idle_workers:
             continue
-        
-        # TODO fix it and make it better -> cleaner
-        if active_workers and len(active_workers.idle_workers) > 0:            
 
-            chosen_worker_id = active_workers.idle_workers.pop()            
-            active_workers.set_busy(chosen_worker_id) # here we need to assign the job to the worker and update the worker status to busy            
-            job = job_queue.popleft() # remove the job from the queue
-            state.pending_jobs[job.request_id] = job
-            state.inflight_by_worker[chosen_worker_id] = job
+        worker_id = pool.idle_workers.pop()
+        pool.set_busy(worker_id)
+        job = job_queue.popleft()
+        state.pending_jobs[job.request_id] = job
+        state.inflight_by_worker[worker_id] = job
+        emit("request_dispatch", request_id=job.request_id, worker_id=worker_id, key=key)
+        append_job_event("dispatched", job.request_id, worker_id=worker_id, key=key)
+        job.payload.setdefault("profile", {})["broker_dispatch_started_time"] = time.time_ns()
+        model_name = job.payload["model_name"]
+        destination = f"{model_name}-{worker_id}".encode("utf-8")
+        socket.send_multipart(
+            [destination, b"", json.dumps(job.payload).encode("utf-8"), *job.images]
+        )
 
-            # send the job to the worker
-            job.payload.setdefault("profile", {})["broker_dispatch_started_time"] = time.time_ns()
-            metadata_bytes = json.dumps(job.payload).encode('utf-8')
-            destination_worker_id = f"{model_name}-{chosen_worker_id}".encode()
-            frames_to_send = [destination_worker_id, b"", metadata_bytes] + job.images
-            socket.send_multipart(frames_to_send)
-
-    for model_name in queues_to_remove:
-        del state.jobs_registry[model_name] 
+    for key in queues_to_remove:
+        del state.jobs_registry[key]
 
 
-def purge_dead_workers(state):
-    # check the worker_maps
+def purge_dead_workers(state: BrokerState) -> None:
     for worker_id, worker in list(state.worker_map.items()):
-        if worker.process.poll() is not None:
-            worker_model_name = worker.model_name
-            state.worker_registry[worker_model_name].discard_worker_id(worker_id)
-            job = state.inflight_by_worker.pop(worker_id, None)
-            if job is not None:
-                state.pending_jobs.pop(job.request_id, None)
-                state.jobs_registry.setdefault(worker_model_name, deque()).appendleft(job)
-            del state.worker_map[worker_id]
-            if state.worker_registry[worker_model_name].is_empty():
-                del state.worker_registry[worker_model_name]
+        if worker.process.poll() is None:
+            continue
+        state.worker_registry[worker.key].discard_worker_id(worker_id)
+        job = state.inflight_by_worker.pop(worker_id, None)
+        if job is not None:
+            emit(
+                "worker_dead_requeue",
+                worker_id=worker_id,
+                key=worker.key,
+                request_id=job.request_id,
+            )
+            append_job_event("requeued", job.request_id, worker_id=worker_id, key=worker.key)
+            state.pending_jobs.pop(job.request_id, None)
+            state.jobs_registry.setdefault(worker.key, deque()).appendleft(job)
+        del state.worker_map[worker_id]
+        if state.worker_registry[worker.key].is_empty():
+            del state.worker_registry[worker.key]
 
 
-# Main loop
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    context = zmq.Context.instance()
-    socket = context.socket(zmq.ROUTER)
-    socket.bind(ROUTER_ADDRESS)
-    LOGGER.info("broker listening on %s", ROUTER_ADDRESS)
-    state = BrokerState() 
-
+    config = load_config()
+    socket = zmq.Context.instance().socket(zmq.ROUTER)
+    socket.bind(config.broker_address)
+    LOGGER.info("broker listening on %s", config.broker_address)
+    state = BrokerState()
     while True:
         receive_message(socket, state)
         purge_dead_workers(state)

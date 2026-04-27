@@ -1,0 +1,24 @@
+runtimes:
+  transformers_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      torch: "2.8.0"
+      transformers: "*"
+      accelerate: "*"
+      pyzmq: "*"
+      pydantic: "*"
+    index_url: https://download.pytorch.org/whl/cu128
+  transformers_cpu:
+    python: "3.12"
+    accelerator: cpu
+    packages:
+      torch: "*"
+      transformers: "*"
+      accelerate: "*"
+      pyzmq: "*"
+      pydantic: "*"
+engines:
+  transformers:
+    install: uv
+    entrypoint: worker.py

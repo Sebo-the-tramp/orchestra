@@ -1,0 +1,21 @@
+family: OpenGVLab/InternVL
+worker: worker_tofix.py
+models:
+  - name: OpenGVLab/InternVL3_5-2B
+    source: huggingface
+    artifact: OpenGVLab/InternVL3_5-2B
+    task: vision_language
+    min_vram_mb: 16000
+    recommended_vram_mb: 16000
+    default_engine: lmdeploy
+    supported_engines: [lmdeploy]
+    default_runtime: cuda128_lmdeploy012
+  - name: OpenGVLab/InternVL3-2B-AWQ
+    source: huggingface
+    artifact: OpenGVLab/InternVL3-2B-AWQ
+    task: vision_language
+    min_vram_mb: 16000
+    recommended_vram_mb: 16000
+    default_engine: lmdeploy
+    supported_engines: [lmdeploy]
+    default_runtime: cuda128_lmdeploy012

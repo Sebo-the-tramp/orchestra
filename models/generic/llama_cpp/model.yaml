@@ -1,0 +1,14 @@
+family: generic/llama_cpp
+worker: worker.py
+models:
+- name: Qwen/Qwen2.5-7B-Instruct-GGUF
+  source: huggingface
+  artifact: unsloth/Qwen2.5-7B-Instruct-GGUF
+  format: gguf
+  task: text_generation
+  min_vram_mb: 8000
+  recommended_vram_mb: 8000
+  default_engine: llama_cpp
+  supported_engines:
+  - llama_cpp
+  default_runtime: llama_cpp_cuda

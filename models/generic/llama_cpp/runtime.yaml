@@ -1,0 +1,42 @@
+runtimes:
+  llama_cpp_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      llama-cpp-python: "*"
+      pyzmq: "*"
+      pydantic: "*"
+    env:
+      CMAKE_ARGS: "-DGGML_CUDA=on"
+      FORCE_CMAKE: "1"
+  llama_cpp_metal:
+    python: "3.12"
+    accelerator: mlx
+    packages:
+      llama-cpp-python: "*"
+      pyzmq: "*"
+      pydantic: "*"
+    env:
+      CMAKE_ARGS: "-DGGML_METAL=on"
+      FORCE_CMAKE: "1"
+  llama_cpp_hip:
+    python: "3.12"
+    accelerator: hip
+    packages:
+      llama-cpp-python: "*"
+      pyzmq: "*"
+      pydantic: "*"
+    env:
+      CMAKE_ARGS: "-DGGML_HIP=on"
+      FORCE_CMAKE: "1"
+  llama_cpp_cpu:
+    python: "3.12"
+    accelerator: cpu
+    packages:
+      llama-cpp-python: "*"
+      pyzmq: "*"
+      pydantic: "*"
+engines:
+  llama_cpp:
+    install: uv
+    entrypoint: worker.py

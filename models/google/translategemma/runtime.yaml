@@ -1,0 +1,31 @@
+runtimes:
+  translategemma_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      torch: "2.8.0"
+      transformers: "*"
+      accelerate: "*"
+      bitsandbytes: "*"
+      sentencepiece: "*"
+      protobuf: "*"
+      pillow: "*"
+      pyzmq: "*"
+      pydantic: "*"
+    index_url: https://download.pytorch.org/whl/cu128
+  translategemma_cpu:
+    python: "3.12"
+    accelerator: cpu
+    packages:
+      torch: "*"
+      transformers: "*"
+      accelerate: "*"
+      sentencepiece: "*"
+      protobuf: "*"
+      pillow: "*"
+      pyzmq: "*"
+      pydantic: "*"
+engines:
+  translategemma:
+    install: uv
+    entrypoint: worker.py

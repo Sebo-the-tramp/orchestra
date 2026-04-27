@@ -1,0 +1,13 @@
+family: generic/dummy
+worker: worker.py
+models:
+  - name: orchestra/dummy-echo
+    source: builtin
+    artifact: builtin
+    format: builtin
+    task: text_generation
+    min_vram_mb: 0
+    recommended_vram_mb: 0
+    default_engine: dummy
+    supported_engines: [dummy]
+    default_runtime: dummy_system

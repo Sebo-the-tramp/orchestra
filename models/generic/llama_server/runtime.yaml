@@ -1,0 +1,17 @@
+runtimes:
+  llama_server_system:
+    python: system
+    accelerator: cpu
+    packages: {}
+  llama_server_cuda:
+    python: system
+    accelerator: cuda
+    packages: {}
+  llama_server_hip:
+    python: system
+    accelerator: hip
+    packages: {}
+engines:
+  llama_server:
+    install: external
+    entrypoint: worker.py

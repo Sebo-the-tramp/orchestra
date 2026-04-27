@@ -1,0 +1,24 @@
+family: google/translategemma
+worker: worker.py
+models:
+  - name: google/translategemma-4b-it
+    aliases: [translategemma, translate]
+    source: huggingface
+    artifact: google/translategemma-4b-it
+    local_path: /home/kilolab/big-storage/llms/models/qwen3/translategemma-4b-it
+    format: hf
+    task: translation
+    min_vram_mb: 5000
+    recommended_vram_mb: 8000
+    default_engine: translategemma
+    supported_engines: [translategemma]
+    default_runtime: translategemma_cuda
+    default_args:
+      - --max-input-tokens
+      - "900"
+      - --max-new-tokens
+      - "1800"
+      - --use-4bit
+      - "1"
+      - --strict-gpu-only
+      - "1"

@@ -1,0 +1,17 @@
+runtimes:
+  faster_whisper_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      faster-whisper: "*"
+      pyzmq: "*"
+  faster_whisper_cpu:
+    python: "3.12"
+    accelerator: cpu
+    packages:
+      faster-whisper: "*"
+      pyzmq: "*"
+engines:
+  faster_whisper:
+    install: uv
+    entrypoint: worker.py

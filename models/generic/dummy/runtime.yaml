@@ -1,0 +1,9 @@
+runtimes:
+  dummy_system:
+    python: system
+    accelerator: cpu
+    packages: {}
+engines:
+  dummy:
+    install: builtin
+    entrypoint: worker.py

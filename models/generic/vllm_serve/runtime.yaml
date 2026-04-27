@@ -1,0 +1,20 @@
+runtimes:
+  vllm_serve_rocm:
+    python: "3.12"
+    accelerator: hip
+    packages:
+      vllm: "*"
+      pyzmq: "*"
+    env:
+      VLLM_PLATFORM: rocm
+      CUDA_VISIBLE_DEVICES: ""
+  vllm_serve_cuda:
+    python: "3.12"
+    accelerator: cuda
+    packages:
+      vllm: "*"
+      pyzmq: "*"
+engines:
+  vllm_serve:
+    install: uv
+    entrypoint: worker.py

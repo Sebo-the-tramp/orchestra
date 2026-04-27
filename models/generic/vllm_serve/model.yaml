@@ -1,0 +1,64 @@
+family: generic/vllm_serve
+worker: worker.py
+models:
+  - name: Qwen/Qwen3-8B-vllm-rocm
+    aliases: [qwen3-8b-vllm, qwen-vllm]
+    source: huggingface
+    artifact: Qwen/Qwen3-8B
+    format: hf
+    task: text_generation
+    min_vram_mb: 9000
+    recommended_vram_mb: 12000
+    default_engine: vllm_serve
+    supported_engines: [vllm_serve]
+    default_runtime: vllm_serve_rocm
+    default_args:
+      - --platform
+      - rocm
+      - --gpu
+      - "0"
+      - --dtype
+      - float16
+      - --block-size
+      - "16"
+      - --max-model-len
+      - "8000"
+      - --gpu-memory-utilization
+      - "0.80"
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+      - --disable-log-requests
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+
+  - name: BAAI/bge-m3-vllm-rocm
+    aliases: [bge-m3, embeddings]
+    source: huggingface
+    artifact: BAAI/bge-m3
+    format: hf
+    task: embedding
+    min_vram_mb: 2000
+    recommended_vram_mb: 4000
+    default_engine: vllm_serve
+    supported_engines: [vllm_serve]
+    default_runtime: vllm_serve_rocm
+    default_args:
+      - --platform
+      - rocm
+      - --gpu
+      - "0"
+      - --dtype
+      - float16
+      - --block-size
+      - "16"
+      - --max-model-len
+      - "8192"
+      - --gpu-memory-utilization
+      - "0.16"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"

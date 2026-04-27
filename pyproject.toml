@@ -8,22 +8,31 @@ version = "0.1.0"
 description = "Minimal orchestration scaffold for coordinating distributed model workers."
 readme = "README.md"
 authors = [
-  {name = "Sebastian Cavada", email = "sebastian.cavada.lab@gmail.com"},  
+  {name = "Sebastian Cavada", email = "sebastian.cavada.lab@gmail.com"},
 ]
-maintainers = [  
-]
+maintainers = []
 requires-python = ">=3.12"
 dependencies = [
     "pyzmq",
     "tqdm",
     "Pillow",
-    "pydantic"
+    "pydantic",
+    "PyYAML",
+    "typer",
+    "rich",
+    "huggingface-hub",
+    "fastapi",
+    "uvicorn",
 ]
+
+[project.scripts]
+orchestra = "orchestra.cli:app"
 
 [dependency-groups]
 dev = [
     "pre-commit",
     "ruff",
+    "pytest",
 ]
 
 [tool.ruff]
@@ -33,7 +42,6 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-[tool.uv.workspace]
-members = [
-    "workers/vlms/internvl",
-]
+[tool.setuptools.packages.find]
+include = ["orchestra*"]
+exclude = ["models*", "recipes*", "docs*"]

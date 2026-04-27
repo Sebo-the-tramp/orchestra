@@ -1,0 +1,21 @@
+family: facebook/dinov3
+worker: worker.py
+models:
+  - name: facebook/dinov3-vits16-pretrain-lvd1689m
+    source: huggingface
+    artifact: facebook/dinov3-vits16-pretrain-lvd1689m
+    task: image_embedding
+    min_vram_mb: 2000
+    recommended_vram_mb: 4000
+    default_engine: transformers
+    supported_engines: [transformers]
+    default_runtime: cuda128_torch28
+  - name: facebook/dinov3-vit7b16-pretrain-lvd1689m
+    source: huggingface
+    artifact: facebook/dinov3-vit7b16-pretrain-lvd1689m
+    task: image_embedding
+    min_vram_mb: 4000
+    recommended_vram_mb: 8000
+    default_engine: transformers
+    supported_engines: [transformers]
+    default_runtime: cuda128_torch28

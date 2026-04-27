@@ -1,0 +1,23 @@
+runtimes:
+  cuda128_torch28:
+    python: "3.12"
+    accelerator: cuda
+    cuda: "12.8"
+    packages:
+      torch: "2.8.0"
+      torchvision: "0.23.0"
+      torchaudio: "2.8.0"
+      matplotlib: "*"
+      pyzmq: "*"
+      pydantic: "*"
+      einops: "*"
+      decord: "*"
+      pycocotools: "*"
+      psutil: "*"
+      transformers: "*"
+      accelerate: "*"
+    index_url: https://download.pytorch.org/whl/cu128
+engines:
+  transformers:
+    install: uv
+    entrypoint: worker.py

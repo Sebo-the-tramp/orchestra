@@ -1,0 +1,19 @@
+runtimes:
+  cuda126_torch27:
+    python: "3.12"
+    accelerator: cuda
+    cuda: "12.6"
+    packages:
+      torch: "2.7.0"
+      torchvision: "0.22.0"
+      torchaudio: "2.7.0"
+      matplotlib: "*"
+      numpy: "*"
+      Pillow: "*"
+      pyzmq: "*"
+      tqdm: "*"
+    index_url: https://download.pytorch.org/whl/cu126
+engines:
+  native:
+    install: uv
+    entrypoint: worker_tofix.py

@@ -1,0 +1,12 @@
+family: facebook/sam3
+worker: worker_tofix.py
+models:
+  - name: facebook/sam3
+    source: huggingface
+    artifact: facebook/sam3
+    task: image_segmentation
+    min_vram_mb: 4000
+    recommended_vram_mb: 8000
+    default_engine: native
+    supported_engines: [native]
+    default_runtime: cuda126_torch27

@@ -1,0 +1,19 @@
+family: openai/whisper
+worker: worker.py
+models:
+  - name: openai/whisper-large-v3-transformers
+    aliases: [whisper-large-v3, whisper]
+    source: huggingface
+    artifact: openai/whisper-large-v3
+    format: hf
+    task: speech_to_text
+    min_vram_mb: 6000
+    recommended_vram_mb: 10000
+    default_engine: whisper_transformers
+    supported_engines: [whisper_transformers]
+    default_runtime: whisper_transformers_cuda
+    default_args:
+      - --chunk-length-s
+      - "30"
+      - --batch-size
+      - "8"

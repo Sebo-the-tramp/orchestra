@@ -1,0 +1,19 @@
+family: Systran/faster-whisper
+worker: worker.py
+models:
+  - name: Systran/faster-whisper-large-v3
+    aliases: [faster-whisper-large-v3, faster-whisper]
+    source: huggingface
+    artifact: Systran/faster-whisper-large-v3
+    format: ctranslate2
+    task: speech_to_text
+    min_vram_mb: 5000
+    recommended_vram_mb: 8000
+    default_engine: faster_whisper
+    supported_engines: [faster_whisper]
+    default_runtime: faster_whisper_cuda
+    default_args:
+      - --compute-type
+      - float16
+      - --beam-size
+      - "5"

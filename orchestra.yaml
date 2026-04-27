@@ -1,0 +1,8 @@
+paths:
+  root: ~/.orchestra
+  model_cache: ~/.orchestra/models
+  engine_cache: ~/.orchestra/engines
+  env_cache: ~/.orchestra/envs
+  logs: ~/.orchestra/logs
+broker:
+  address: tcp://10.10.151.14:5556
