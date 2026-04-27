@@ -25,6 +25,8 @@ from orchestra.registry import (
 from orchestra.runtime import build_worker_command, compatible, env_status
 
 POLL_TIMEOUT_MS = 10
+IDLE_PRESSURE_EVICT_SECONDS = 3.0
+STOPPING_WORKER_GRACE_SECONDS = 10.0
 LOGGER = logging.getLogger(__name__)
 
 
@@ -39,6 +41,7 @@ class Job:
 class WorkerStatus(Enum):
     IDLE = "IDLE"
     BUSY = "BUSY"
+    STOPPING = "STOPPING"
     WAITING = "WAITING"
 
 
@@ -49,6 +52,8 @@ class Worker:
     process: subprocess.Popen[Any]
     started_at: float
     status: WorkerStatus = WorkerStatus.WAITING
+    idle_since: float | None = None
+    stopping_since: float | None = None
 
 
 @dataclass(slots=True)
@@ -126,6 +131,19 @@ def worker_key(payload: dict[str, Any]) -> str:
     runtime = payload.get("runtime", spec.default_runtime)
     args = json.dumps(payload.get("args_per_model", {}), sort_keys=True)
     return f"{model}|{engine}|{runtime}|{args}"
+
+
+def set_worker_idle(worker: Worker) -> None:
+    if worker.status != WorkerStatus.IDLE:
+        worker.idle_since = time.monotonic()
+    worker.status = WorkerStatus.IDLE
+    worker.stopping_since = None
+
+
+def set_worker_busy(worker: Worker) -> None:
+    worker.status = WorkerStatus.BUSY
+    worker.idle_since = None
+    worker.stopping_since = None
 
 
 def model_for_payload(payload: dict[str, Any]) -> ModelSpec:
@@ -238,7 +256,10 @@ def handle_worker_message(socket: zmq.Socket, state: BrokerState, frames: list[b
     key = worker.key if worker is not None else None
 
     if message_type == "HEARTBEAT" and key is not None:
+        if worker.status == WorkerStatus.STOPPING:
+            return
         emit("worker_heartbeat", worker_id=worker_id, model=model_name, key=key)
+        set_worker_idle(worker)
         state.worker_registry[key].set_idle(worker_id)
         return
 
@@ -251,6 +272,7 @@ def handle_worker_message(socket: zmq.Socket, state: BrokerState, frames: list[b
             model=model_name,
             type=message_type,
         )
+        set_worker_idle(worker)
         state.worker_registry[key].set_idle(worker_id)
         job = state.inflight_by_worker.pop(worker_id, None)
         request_id = payload.get("request_id")
@@ -291,6 +313,51 @@ def receive_message(socket: zmq.Socket, state: BrokerState) -> None:
     handle_worker_message(socket, state, frames)
 
 
+def shutdown_idle_worker(socket: zmq.Socket, state: BrokerState, worker_id: str) -> None:
+    worker = state.worker_map[worker_id]
+    pool = state.worker_registry.get(worker.key)
+    if pool is not None:
+        pool.discard_worker_id(worker_id)
+    worker.status = WorkerStatus.STOPPING
+    worker.idle_since = None
+    worker.stopping_since = time.monotonic()
+    destination = f"{worker.model_name}-{worker_id}".encode("utf-8")
+    payload = {"type": "SHUTDOWN", "model_name": worker.model_name}
+    socket.send_multipart([destination, b"", json.dumps(payload).encode("utf-8")])
+    emit(
+        "worker_shutdown_request",
+        worker_id=worker_id,
+        model=worker.model_name,
+        key=worker.key,
+        reason="queued_model_pressure",
+    )
+    append_job_event(
+        "worker_shutdown",
+        None,
+        worker_id=worker_id,
+        model=worker.model_name,
+        key=worker.key,
+        reason="queued_model_pressure",
+    )
+
+
+def idle_pressure_blocks_spawn(socket: zmq.Socket, state: BrokerState, target_key: str) -> bool:
+    now = time.monotonic()
+    blocked = False
+    for worker_id, worker in list(state.worker_map.items()):
+        if worker.key == target_key:
+            continue
+        if worker.status == WorkerStatus.STOPPING:
+            blocked = True
+            continue
+        if worker.status != WorkerStatus.IDLE or worker.idle_since is None:
+            continue
+        blocked = True
+        if now - worker.idle_since >= IDLE_PRESSURE_EVICT_SECONDS:
+            shutdown_idle_worker(socket, state, worker_id)
+    return blocked
+
+
 def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
     queues_to_remove = []
     for key, job_queue in state.jobs_registry.items():
@@ -299,7 +366,12 @@ def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
             continue
 
         pool = state.worker_registry.get(key)
+        if pool is not None and pool.is_empty():
+            del state.worker_registry[key]
+            pool = None
         if pool is None:
+            if idle_pressure_blocks_spawn(socket, state, key):
+                continue
             state.spawn_worker_for_job(job_queue[0])
             continue
         if pool.wait_workers or not pool.idle_workers:
@@ -307,6 +379,7 @@ def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
 
         worker_id = pool.idle_workers.pop()
         pool.set_busy(worker_id)
+        set_worker_busy(state.worker_map[worker_id])
         job = job_queue.popleft()
         state.pending_jobs[job.request_id] = job
         state.inflight_by_worker[worker_id] = job
@@ -325,9 +398,18 @@ def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
 
 def purge_dead_workers(state: BrokerState) -> None:
     for worker_id, worker in list(state.worker_map.items()):
+        if (
+            worker.status == WorkerStatus.STOPPING
+            and worker.stopping_since is not None
+            and time.monotonic() - worker.stopping_since >= STOPPING_WORKER_GRACE_SECONDS
+            and worker.process.poll() is None
+        ):
+            worker.process.terminate()
         if worker.process.poll() is None:
             continue
-        state.worker_registry[worker.key].discard_worker_id(worker_id)
+        pool = state.worker_registry.get(worker.key)
+        if pool is not None:
+            pool.discard_worker_id(worker_id)
         job = state.inflight_by_worker.pop(worker_id, None)
         if job is not None:
             emit(
@@ -340,7 +422,7 @@ def purge_dead_workers(state: BrokerState) -> None:
             state.pending_jobs.pop(job.request_id, None)
             state.jobs_registry.setdefault(worker.key, deque()).appendleft(job)
         del state.worker_map[worker_id]
-        if state.worker_registry[worker.key].is_empty():
+        if worker.key in state.worker_registry and state.worker_registry[worker.key].is_empty():
             del state.worker_registry[worker.key]
 
 

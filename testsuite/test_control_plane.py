@@ -85,12 +85,15 @@ def test_model_aliases_and_worker_bool_args() -> None:
     assert "True" not in command
 
 
-def test_vram_is_advisory_not_a_hard_route_block() -> None:
+def test_vram_is_advisory_not_a_hard_route_block(monkeypatch) -> None:
     from orchestra.hardware import Gpu, HardwareReport
 
     config = load_config()
     registry = load_registry()
     model = model_by_name(registry, "qwen3.6-35b")
+    monkeypatch.setattr("orchestra.routing.model_status", lambda *_: "downloaded")
+    monkeypatch.setattr("orchestra.routing.env_status", lambda *_: "ready")
+    monkeypatch.setattr("orchestra.routing.compatible", lambda *_: True)
     hardware = HardwareReport(
         os="linux",
         machine="x86_64",
@@ -106,6 +109,49 @@ def test_vram_is_advisory_not_a_hard_route_block() -> None:
     assert direct.ready
     assert "advisory" in direct.reason
     assert candidate.ready
+
+
+def test_idle_worker_is_evicted_under_queued_model_pressure() -> None:
+    import time
+
+    from broker_core import (
+        BrokerState,
+        Worker,
+        WorkerPool,
+        WorkerStatus,
+        idle_pressure_blocks_spawn,
+    )
+
+    class FakeProcess:
+        def poll(self):
+            return None
+
+        def terminate(self) -> None:
+            pass
+
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.frames = []
+
+        def send_multipart(self, frames) -> None:
+            self.frames.append(frames)
+
+    state = BrokerState()
+    socket = FakeSocket()
+    state.worker_map["old-worker"] = Worker(
+        key="old-key",
+        model_name="old-model",
+        process=FakeProcess(),
+        started_at=time.monotonic() - 100,
+        status=WorkerStatus.IDLE,
+        idle_since=time.monotonic() - 4,
+    )
+    state.worker_registry["old-key"] = WorkerPool(idle_workers={"old-worker"})
+
+    assert idle_pressure_blocks_spawn(socket, state, "new-key")
+    assert state.worker_map["old-worker"].status == WorkerStatus.STOPPING
+    assert not state.worker_registry["old-key"].idle_workers
+    assert socket.frames[0][0] == b"old-model-old-worker"
 
 
 def test_text_generation_routing_returns_candidates() -> None:
