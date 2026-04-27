@@ -44,3 +44,4 @@ select = ["E", "F", "I"]
 
 [tool.setuptools]
 packages = ["orchestra"]
+py-modules = ["broker_core"]
