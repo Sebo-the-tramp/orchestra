@@ -42,6 +42,5 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I"]
 
-[tool.setuptools.packages.find]
-include = ["orchestra*"]
-exclude = ["models*", "recipes*", "docs*"]
+[tool.setuptools]
+packages = ["orchestra"]
