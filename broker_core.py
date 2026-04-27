@@ -347,8 +347,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     config = load_config()
     socket = zmq.Context.instance().socket(zmq.ROUTER)
-    socket.bind(config.broker_address)
-    LOGGER.info("broker listening on %s", config.broker_address)
+    socket.bind(config.broker_bind_address)
+    LOGGER.info("broker listening on %s", config.broker_bind_address)
     state = BrokerState()
     while True:
         receive_message(socket, state)

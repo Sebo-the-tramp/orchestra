@@ -44,6 +44,7 @@ def snapshot_data(
             "logs": str(config.logs),
         },
         "broker_address": config.broker_address,
+        "broker_bind_address": config.broker_bind_address,
         "models": models,
         "runtimes": [runtime.__dict__ for runtime in registry.runtimes.values()],
         "engines": [engine.__dict__ for engine in registry.engines.values()],

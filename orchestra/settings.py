@@ -11,6 +11,8 @@ CONFIG_KEYS = {
     "paths.env_cache",
     "paths.logs",
     "broker.address",
+    "broker.bind_address",
+    "broker.connect_address",
 }
 
 

@@ -159,7 +159,8 @@ def init(dry_run: bool = False) -> None:
             f"  env_cache: {config.env_cache}\n"
             f"  logs: {config.logs}\n"
             "broker:\n"
-            f"  address: {config.broker_address}\n"
+            f"  bind_address: {config.broker_bind_address}\n"
+            f"  connect_address: {config.broker_address}\n"
         )
     console.print(f"Initialized ORCHESTRA at {config.root}")
 
@@ -290,7 +291,8 @@ def config_show() -> None:
     table.add_row("paths.engine_cache", str(config.engine_cache))
     table.add_row("paths.env_cache", str(config.env_cache))
     table.add_row("paths.logs", str(config.logs))
-    table.add_row("broker.address", config.broker_address)
+    table.add_row("broker.bind_address", config.broker_bind_address)
+    table.add_row("broker.connect_address", config.broker_address)
     for node in config_data().get("nodes", []):
         table.add_row(f"nodes.{node['name']}", node["address"])
     console.print(table)
@@ -962,7 +964,8 @@ def broker_start(dry_run: bool = False) -> None:
     if dry_run:
         config = load_config()
         registry = load_registry()
-        console.print(f"Would bind broker to {config.broker_address}")
+        console.print(f"Would bind broker to {config.broker_bind_address}")
+        console.print(f"Clients/workers connect to {config.broker_address}")
         console.print(f"Would load {len(registry.models)} models from registry")
         return
     from broker_core import main

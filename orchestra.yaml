@@ -5,4 +5,5 @@ paths:
   env_cache: ~/.orchestra/envs
   logs: ~/.orchestra/logs
 broker:
-  address: tcp://10.10.151.14:5556
+  bind_address: tcp://0.0.0.0:5556
+  connect_address: tcp://127.0.0.1:5556
