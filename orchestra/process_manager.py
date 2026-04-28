@@ -63,13 +63,27 @@ class GflowJob:
 
 
 def gflow_available() -> bool:
-    return all(shutil.which(command) for command in GFLOW_COMMANDS)
+    return not missing_gflow_commands()
+
+
+def missing_gflow_commands() -> list[str]:
+    return [command for command in GFLOW_COMMANDS if shutil.which(command) is None]
+
+
+def assert_gflow_available() -> None:
+    missing = missing_gflow_commands()
+    assert not missing, (
+        "gflow process manager requested but commands are missing: "
+        f"{', '.join(missing)}. Install gflow or use ORCHESTRA_PROCESS_MANAGER=auto/local."
+    )
 
 
 def process_manager_kind(kind: str) -> str:
     if kind == "auto":
         return "gflow" if gflow_available() else "local"
     assert kind in {"local", "gflow"}, kind
+    if kind == "gflow":
+        assert_gflow_available()
     return kind
 
 
@@ -92,6 +106,7 @@ def write_job_script(command: list[str], logs: Path, name: str) -> Path:
 
 
 def submit_gflow(command: list[str], name: str, gpus: int, logs: Path) -> GflowJob:
+    assert_gflow_available()
     subprocess.run(["gflowd", "up"], check=True)
     script = write_job_script(command, logs, name)
     output = subprocess.check_output(

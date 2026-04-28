@@ -15,6 +15,7 @@ RESET_TMUX="${ORCHESTRA_TEST_RESET_TMUX:-1}"
 STOP_EXISTING="${ORCHESTRA_TEST_STOP_EXISTING:-$RESET_TMUX}"
 TMUX_SESSION="${ORCHESTRA_TEST_TMUX_SESSION:-orchestra_gflow_test}"
 PROCESS_MANAGER="${ORCHESTRA_PROCESS_MANAGER:-auto}"
+GFLOW_COMMANDS=(gflowd gbatch gqueue gjob gcancel)
 QWEN_35B_MODEL="${ORCHESTRA_TEST_QWEN_35B_MODEL:-qwen3.6-35b}"
 QWEN_9B_MODEL="${ORCHESTRA_TEST_QWEN_9B_MODEL:-qwen3.5-9b}"
 WHISPER_MODEL="${ORCHESTRA_TEST_WHISPER_MODEL:-whisper}"
@@ -44,6 +45,23 @@ log() {
 
 have() {
     command -v "$1" >/dev/null 2>&1
+}
+
+preflight_process_manager() {
+    local missing=()
+    if [ "$PROCESS_MANAGER" != "gflow" ]; then
+        return
+    fi
+    for command in "${GFLOW_COMMANDS[@]}"; do
+        if ! have "$command"; then
+            missing+=("$command")
+        fi
+    done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        log "ERRORE: ORCHESTRA_PROCESS_MANAGER=gflow ma mancano comandi: ${missing[*]}"
+        log "Installa gflow oppure usa ORCHESTRA_PROCESS_MANAGER=auto/local."
+        exit 1
+    fi
 }
 
 elapsed() {
@@ -441,6 +459,7 @@ main() {
     printf 'case\tstatus\tseconds\tfile\n' >"$SUMMARY"
     log "Output: $OUT_DIR"
     log "tmux session: $TMUX_SESSION"
+    preflight_process_manager
     make_assets
     snapshot
     if [ "$START_STACK" = "1" ]; then

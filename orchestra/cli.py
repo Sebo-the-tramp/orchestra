@@ -18,7 +18,12 @@ from orchestra.model_store import (
     remove_model,
 )
 from orchestra.nodes import NodeSpec, load_node_specs, local_node_status, write_node_spec
-from orchestra.process_manager import GFLOW_COMMANDS, gflow_available, process_manager_kind
+from orchestra.process_manager import (
+    GFLOW_COMMANDS,
+    gflow_available,
+    missing_gflow_commands,
+    process_manager_kind,
+)
 from orchestra.profiles import architecture_profile, default_llm_engine_runtime, setup_plan
 from orchestra.registry import engine_for_model, load_registry, model_by_name, runtime_for_model
 from orchestra.routing import candidate_status, candidates_for_task, choose_model
@@ -908,8 +913,12 @@ def gflow_status() -> None:
     for command in GFLOW_COMMANDS:
         table.add_row(command, "yes" if shutil.which(command) else "missing")
     table.add_row("available", "yes" if gflow_available() else "no")
+    table.add_row("missing", ", ".join(missing_gflow_commands()))
     table.add_row("configured_manager", config.process_manager)
-    table.add_row("resolved_manager", process_manager_kind(config.process_manager))
+    if config.process_manager == "gflow" and not gflow_available():
+        table.add_row("resolved_manager", "blocked: missing gflow commands")
+    else:
+        table.add_row("resolved_manager", process_manager_kind(config.process_manager))
     console.print(table)
 
 

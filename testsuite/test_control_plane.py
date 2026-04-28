@@ -1,7 +1,12 @@
 from orchestra.config import load_config
 from orchestra.hardware import detect_hardware
 from orchestra.nodes import local_node_status
-from orchestra.process_manager import process_manager_kind, safe_name, worker_gpus
+from orchestra.process_manager import (
+    missing_gflow_commands,
+    process_manager_kind,
+    safe_name,
+    worker_gpus,
+)
 from orchestra.profiles import architecture_profile, default_llm_engine_runtime, setup_plan
 from orchestra.registry import engine_for_model, load_registry, model_by_name, runtime_for_model
 from orchestra.routing import candidate_status, candidates_for_task, choose_model
@@ -91,6 +96,15 @@ def test_process_manager_helpers() -> None:
     assert worker_gpus("cpu") == 0
     assert worker_gpus("cuda") == 1
     assert safe_name("orchestra/Qwen 35B!") == "orchestra-Qwen-35B"
+
+
+def test_forced_gflow_fails_fast_when_missing(monkeypatch) -> None:
+    import pytest
+
+    monkeypatch.setattr("orchestra.process_manager.shutil.which", lambda _: None)
+    assert "gflowd" in missing_gflow_commands()
+    with pytest.raises(AssertionError, match="gflow process manager requested"):
+        process_manager_kind("gflow")
 
 
 def test_vram_is_advisory_not_a_hard_route_block(monkeypatch) -> None:
