@@ -25,6 +25,7 @@ from orchestra.registry import (
 from orchestra.runtime import build_worker_command, compatible, env_status
 
 POLL_TIMEOUT_MS = 10
+MAX_WORKER_SPAWN_ATTEMPTS = 3
 IDLE_PRESSURE_EVICT_SECONDS = 3.0
 IDLE_NO_QUEUE_EVICT_SECONDS = 3.0
 STOPPING_WORKER_GRACE_SECONDS = 10.0
@@ -37,6 +38,7 @@ class Job:
     client_id: bytes
     payload: dict[str, Any]
     images: list[bytes] = field(default_factory=list)
+    spawn_attempts: int = 0
 
 
 class WorkerStatus(Enum):
@@ -410,7 +412,31 @@ def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
                 continue
             if idle_pressure_blocks_spawn(socket, state, key):
                 continue
-            state.spawn_worker_for_job(job_queue[0])
+            job = job_queue[0]
+            if job.spawn_attempts >= MAX_WORKER_SPAWN_ATTEMPTS:
+                job_queue.popleft()
+                payload = error_payload(
+                    job.request_id,
+                    "WORKER_START_FAILED",
+                    f"Worker failed to start after {MAX_WORKER_SPAWN_ATTEMPTS} attempts",
+                    job.payload["model_name"],
+                )
+                send_client_payload(socket, job.client_id, payload)
+                append_job_event(
+                    "rejected",
+                    job.request_id,
+                    model=job.payload["model_name"],
+                    code="WORKER_START_FAILED",
+                )
+                emit(
+                    "request_rejected",
+                    request_id=job.request_id,
+                    model=job.payload["model_name"],
+                    code="WORKER_START_FAILED",
+                )
+                continue
+            job.spawn_attempts += 1
+            state.spawn_worker_for_job(job)
             continue
         if pool.wait_workers or not pool.idle_workers:
             continue

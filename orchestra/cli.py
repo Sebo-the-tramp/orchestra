@@ -22,6 +22,7 @@ from orchestra.process_manager import (
     GFLOW_COMMANDS,
     GFLOW_INSTALL_COMMANDS,
     gflow_available,
+    gflow_queue_job_ids,
     missing_gflow_commands,
     process_manager_kind,
 )
@@ -962,6 +963,26 @@ def gflow_cancel(job_id: str) -> None:
 
     assert shutil.which("gcancel"), "gcancel is missing"
     subprocess.run(["gcancel", job_id], check=True)
+
+
+@gflow_app.command("cancel-orchestra")
+def gflow_cancel_orchestra(dry_run: bool = False) -> None:
+    import shutil
+    import subprocess
+
+    assert shutil.which("gqueue"), "gqueue is missing"
+    assert shutil.which("gcancel"), "gcancel is missing"
+    output = subprocess.check_output(["gqueue"], text=True)
+    job_ids = gflow_queue_job_ids(output)
+    table = Table(title="Cancel ORCHESTRA gflow Jobs")
+    table.add_column("Job")
+    table.add_column("Action")
+    for job_id in job_ids:
+        action = "would cancel" if dry_run else "cancelled"
+        table.add_row(job_id, action)
+        if not dry_run:
+            subprocess.run(["gcancel", job_id], check=True)
+    console.print(table)
 
 
 @gflow_app.command("log")

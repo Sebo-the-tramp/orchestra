@@ -3,6 +3,8 @@ from orchestra.hardware import detect_hardware
 from orchestra.nodes import local_node_status
 from orchestra.process_manager import (
     GflowJob,
+    gflow_job_id,
+    gflow_queue_job_ids,
     missing_gflow_commands,
     process_manager_kind,
     safe_name,
@@ -122,6 +124,25 @@ def test_gflow_poll_marks_missing_job_failed(monkeypatch, tmp_path) -> None:
     job = GflowJob(job_id="40839", script_path=tmp_path / "worker.sh")
     assert job.poll() == 1
     assert job.poll() == 1
+
+
+def test_gflow_job_id_ignores_uuid_digits() -> None:
+    output = "Submitted job gjob-1-orchestra-974a376d-df3a-4aa6-b0b4-02eb74d40839\n"
+    assert gflow_job_id(output) == "1"
+    assert gflow_job_id("Submitted batch job 42\n") == "42"
+    assert gflow_job_id("  7       gjob-7-orchestra-abc123\n") == "7"
+
+
+def test_gflow_queue_job_ids_selects_orchestra_jobs() -> None:
+    output = "\n".join(
+        [
+            "JOBID NAME ST TIME NODES NODELIST(REASON)",
+            "1 gjob-1-orchestra-abc PD - 1 (Resources)",
+            "2 gjob-2-other PD - 1 (Resources)",
+            "3 gjob-3-orchestra-def R 00:01 1 localhost",
+        ]
+    )
+    assert gflow_queue_job_ids(output) == ["1", "3"]
 
 
 def test_vram_is_advisory_not_a_hard_route_block(monkeypatch) -> None:

@@ -119,6 +119,29 @@ def write_job_script(command: list[str], logs: Path, name: str) -> Path:
     return path
 
 
+def gflow_job_id(output: str) -> str:
+    patterns = [
+        r"\bgjob-(\d+)-",
+        r"\bjob\s+(\d+)\b",
+        r"^\s*(\d+)\s+gjob-\d+-",
+        r"^\s*(\d+)\s*$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, output, flags=re.IGNORECASE | re.MULTILINE)
+        if match is not None:
+            return match.group(1)
+    raise AssertionError(output)
+
+
+def gflow_queue_job_ids(output: str, name_fragment: str = "orchestra-") -> list[str]:
+    ids = []
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].isdigit() and name_fragment in parts[1]:
+            ids.append(parts[0])
+    return ids
+
+
 def submit_gflow(command: list[str], name: str, gpus: int, logs: Path) -> GflowJob:
     assert_gflow_available()
     subprocess.run(["gflowd", "up"], check=True)
@@ -127,9 +150,7 @@ def submit_gflow(command: list[str], name: str, gpus: int, logs: Path) -> GflowJ
         ["gbatch", "--gpus", str(gpus), "--project", GFLOW_PROJECT, "--name", name, str(script)],
         text=True,
     )
-    matches = re.findall(r"\d+", output)
-    assert matches, output
-    return GflowJob(job_id=matches[-1], script_path=script)
+    return GflowJob(job_id=gflow_job_id(output), script_path=script)
 
 
 def start_process(
