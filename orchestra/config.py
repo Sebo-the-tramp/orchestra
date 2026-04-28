@@ -10,6 +10,7 @@ CONFIG_PATH = ROOT / "orchestra.yaml"
 DEFAULT_HOME = Path(os.environ.get("ORCHESTRA_HOME", Path.home() / ".orchestra"))
 DEFAULT_BROKER_BIND_ADDRESS = "tcp://0.0.0.0:5556"
 DEFAULT_BROKER_CONNECT_ADDRESS = "tcp://127.0.0.1:5556"
+DEFAULT_PROCESS_MANAGER = "auto"
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class OrchestraConfig:
     logs: Path
     broker_address: str
     broker_bind_address: str
+    process_manager: str
 
 
 def _data() -> dict[str, Any]:
@@ -33,6 +35,7 @@ def load_config() -> OrchestraConfig:
     data = _data()
     paths = data.get("paths", {})
     broker = data.get("broker", {})
+    process = data.get("process", {})
     root = Path(paths.get("root", DEFAULT_HOME)).expanduser()
     model_cache_value = os.environ.get(
         "ORCHESTRA_MODEL_CACHE",
@@ -52,6 +55,10 @@ def load_config() -> OrchestraConfig:
         broker_bind_address=os.environ.get(
             "ORCHESTRA_BROKER_BIND_ADDRESS",
             broker.get("bind_address", DEFAULT_BROKER_BIND_ADDRESS),
+        ),
+        process_manager=os.environ.get(
+            "ORCHESTRA_PROCESS_MANAGER",
+            process.get("manager", DEFAULT_PROCESS_MANAGER),
         ),
     )
 

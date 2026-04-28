@@ -18,6 +18,7 @@ from orchestra.model_store import (
     remove_model,
 )
 from orchestra.nodes import NodeSpec, load_node_specs, local_node_status, write_node_spec
+from orchestra.process_manager import GFLOW_COMMANDS, gflow_available, process_manager_kind
 from orchestra.profiles import architecture_profile, default_llm_engine_runtime, setup_plan
 from orchestra.registry import engine_for_model, load_registry, model_by_name, runtime_for_model
 from orchestra.routing import candidate_status, candidates_for_task, choose_model
@@ -47,6 +48,7 @@ nodes_app = typer.Typer(no_args_is_help=True)
 metrics_app = typer.Typer(no_args_is_help=True)
 schedule_app = typer.Typer(no_args_is_help=True)
 jobs_app = typer.Typer(no_args_is_help=True)
+gflow_app = typer.Typer(no_args_is_help=True)
 profile_app = typer.Typer(no_args_is_help=True)
 setup_app = typer.Typer(no_args_is_help=True)
 config_app = typer.Typer(no_args_is_help=True)
@@ -63,6 +65,7 @@ app.add_typer(nodes_app, name="nodes")
 app.add_typer(metrics_app, name="metrics")
 app.add_typer(schedule_app, name="schedule")
 app.add_typer(jobs_app, name="jobs")
+app.add_typer(gflow_app, name="gflow")
 app.add_typer(profile_app, name="profile")
 app.add_typer(setup_app, name="setup")
 app.add_typer(config_app, name="config")
@@ -161,6 +164,8 @@ def init(dry_run: bool = False) -> None:
             "broker:\n"
             f"  bind_address: {config.broker_bind_address}\n"
             f"  connect_address: {config.broker_address}\n"
+            "process:\n"
+            f"  manager: {config.process_manager}\n"
         )
     console.print(f"Initialized ORCHESTRA at {config.root}")
 
@@ -184,7 +189,7 @@ def doctor(json: bool = False, fix_plan: bool = False) -> None:
     table.add_row("CUDA", "yes" if report.cuda else "no")
     table.add_row("ROCm/HIP", "yes" if report.rocm else "no")
     table.add_row("MLX/MPS", "yes" if report.mlx else "no")
-    for tool in ["curl", "sudo", "unshare", "wget", "tmux"]:
+    for tool in ["curl", "sudo", "unshare", "wget", "tmux", *GFLOW_COMMANDS]:
         table.add_row(tool, "yes" if shutil.which(tool) else "missing")
     for index, gpu in enumerate(report.gpus):
         table.add_row(f"GPU {index}", f"{gpu.name} {gpu.free_mb}/{gpu.total_mb} MB free")
@@ -293,6 +298,8 @@ def config_show() -> None:
     table.add_row("paths.logs", str(config.logs))
     table.add_row("broker.bind_address", config.broker_bind_address)
     table.add_row("broker.connect_address", config.broker_address)
+    table.add_row("process.manager", config.process_manager)
+    table.add_row("process.resolved_manager", process_manager_kind(config.process_manager))
     for node in config_data().get("nodes", []):
         table.add_row(f"nodes.{node['name']}", node["address"])
     console.print(table)
@@ -890,6 +897,58 @@ def jobs_tail(limit: int = 20) -> None:
     console.print(table)
 
 
+@gflow_app.command("status")
+def gflow_status() -> None:
+    import shutil
+
+    config = load_config()
+    table = Table(title="gflow")
+    table.add_column("Check")
+    table.add_column("Value")
+    for command in GFLOW_COMMANDS:
+        table.add_row(command, "yes" if shutil.which(command) else "missing")
+    table.add_row("available", "yes" if gflow_available() else "no")
+    table.add_row("configured_manager", config.process_manager)
+    table.add_row("resolved_manager", process_manager_kind(config.process_manager))
+    console.print(table)
+
+
+@gflow_app.command("up")
+def gflow_up() -> None:
+    import shutil
+    import subprocess
+
+    assert shutil.which("gflowd"), "gflowd is missing"
+    subprocess.run(["gflowd", "up"], check=True)
+
+
+@gflow_app.command("queue")
+def gflow_queue() -> None:
+    import shutil
+    import subprocess
+
+    assert shutil.which("gqueue"), "gqueue is missing"
+    subprocess.run(["gqueue"], check=True)
+
+
+@gflow_app.command("cancel")
+def gflow_cancel(job_id: str) -> None:
+    import shutil
+    import subprocess
+
+    assert shutil.which("gcancel"), "gcancel is missing"
+    subprocess.run(["gcancel", job_id], check=True)
+
+
+@gflow_app.command("log")
+def gflow_log(job_id: str) -> None:
+    import shutil
+    import subprocess
+
+    assert shutil.which("gjob"), "gjob is missing"
+    subprocess.run(["gjob", "log", job_id], check=True)
+
+
 @profile_app.command("show")
 def profile_show() -> None:
     hardware = detect_hardware()
@@ -970,6 +1029,7 @@ def broker_start(dry_run: bool = False) -> None:
         registry = load_registry()
         console.print(f"Would bind broker to {config.broker_bind_address}")
         console.print(f"Clients/workers connect to {config.broker_address}")
+        console.print(f"Worker process manager: {process_manager_kind(config.process_manager)}")
         console.print(f"Would load {len(registry.models)} models from registry")
         return
     from broker_core import main

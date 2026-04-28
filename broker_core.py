@@ -1,6 +1,5 @@
 import json
 import logging
-import subprocess
 import time
 import uuid
 from collections import deque
@@ -15,6 +14,7 @@ from orchestra.hardware import detect_hardware
 from orchestra.job_store import append_job_event
 from orchestra.metrics import emit
 from orchestra.model_store import model_status
+from orchestra.process_manager import start_process
 from orchestra.registry import (
     ModelSpec,
     engine_for_model,
@@ -50,7 +50,7 @@ class WorkerStatus(Enum):
 class Worker:
     key: str
     model_name: str
-    process: subprocess.Popen[Any]
+    process: Any
     started_at: float
     status: WorkerStatus = WorkerStatus.WAITING
     idle_since: float | None = None
@@ -114,7 +114,13 @@ class BrokerState:
         )
         LOGGER.info("spawning worker key=%s command=%s", worker_key(job.payload), " ".join(command))
         emit("worker_spawn", key=worker_key(job.payload), model=model.name, command=command)
-        process = subprocess.Popen(command)
+        process = start_process(
+            command=command,
+            name=f"orchestra-{worker_id}",
+            accelerator=runtime.accelerator,
+            logs=config.logs,
+            manager=config.process_manager,
+        )
         key = worker_key(job.payload)
         self.worker_map[worker_id] = Worker(
             key=key,

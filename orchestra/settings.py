@@ -13,6 +13,7 @@ CONFIG_KEYS = {
     "broker.address",
     "broker.bind_address",
     "broker.connect_address",
+    "process.manager",
 }
 
 

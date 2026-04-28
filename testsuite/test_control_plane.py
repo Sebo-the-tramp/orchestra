@@ -1,6 +1,7 @@
 from orchestra.config import load_config
 from orchestra.hardware import detect_hardware
 from orchestra.nodes import local_node_status
+from orchestra.process_manager import process_manager_kind, safe_name, worker_gpus
 from orchestra.profiles import architecture_profile, default_llm_engine_runtime, setup_plan
 from orchestra.registry import engine_for_model, load_registry, model_by_name, runtime_for_model
 from orchestra.routing import candidate_status, candidates_for_task, choose_model
@@ -83,6 +84,13 @@ def test_model_aliases_and_worker_bool_args() -> None:
     assert model.name == "unsloth/Qwen3.5-9B-UD-Q4_K_XL"
     assert "--isolate-gpu-devices" in command
     assert "True" not in command
+
+
+def test_process_manager_helpers() -> None:
+    assert process_manager_kind("local") == "local"
+    assert worker_gpus("cpu") == 0
+    assert worker_gpus("cuda") == 1
+    assert safe_name("orchestra/Qwen 35B!") == "orchestra-Qwen-35B"
 
 
 def test_vram_is_advisory_not_a_hard_route_block(monkeypatch) -> None:
@@ -272,6 +280,7 @@ def test_broker_dummy_end_to_end() -> None:
     env = os.environ | {
         "ORCHESTRA_BROKER_ADDRESS": address,
         "ORCHESTRA_BROKER_BIND_ADDRESS": address,
+        "ORCHESTRA_PROCESS_MANAGER": "local",
     }
     process = subprocess.Popen(
         [sys.executable, "broker_core.py"],

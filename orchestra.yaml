@@ -7,3 +7,5 @@ paths:
 broker:
   bind_address: tcp://0.0.0.0:5556
   connect_address: tcp://127.0.0.1:5556
+process:
+  manager: auto
