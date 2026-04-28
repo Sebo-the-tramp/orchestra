@@ -80,6 +80,33 @@ record() {
     printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" | tee -a "$SUMMARY"
 }
 
+show_tail() {
+    local title="$1"
+    local path="$2"
+    if [ ! -f "$path" ]; then
+        return
+    fi
+    log "$title: $path"
+    tail -n 80 "$path" | sed 's/^/  | /'
+}
+
+show_runtime_errors() {
+    local case_name="$1"
+    log "Error context for $case_name"
+    show_tail "case stdout" "$OUT_DIR/$case_name.out"
+    show_tail "case stderr" "$OUT_DIR/$case_name.err"
+    show_tail "broker log" "$BROKER_LOG"
+    show_tail "api log" "$API_LOG"
+    if have gqueue; then
+        log "gqueue snapshot"
+        gqueue 2>&1 | sed 's/^/  | /'
+    fi
+    if have nvidia-smi; then
+        log "nvidia-smi snapshot"
+        nvidia-smi 2>&1 | sed 's/^/  | /'
+    fi
+}
+
 run_timed() {
     local name="$1"
     shift
@@ -108,6 +135,11 @@ PY
         sleep "$PROGRESS_SECONDS"
         if [ ! -f "$status_file" ]; then
             log "WAIT  $name $(elapsed "$start")s; tmux: tmux attach -t $TMUX_SESSION"
+            show_tail "broker log" "$BROKER_LOG"
+            if have gqueue; then
+                log "gqueue snapshot"
+                gqueue 2>&1 | sed 's/^/  | /'
+            fi
         fi
     done
     wait "$command_pid" >/dev/null 2>&1
@@ -121,6 +153,7 @@ PY
     else
         log "FAIL  $name ${seconds}s status=$status"
         record "$name" "FAIL" "$seconds" "$err"
+        show_runtime_errors "$name"
     fi
     return "$status"
 }
@@ -433,6 +466,7 @@ PY
     else
         log "FAIL  $name ${seconds}s status=$status"
         record "$name" "FAIL" "$seconds" "$err"
+        show_runtime_errors "$name"
     fi
 }
 

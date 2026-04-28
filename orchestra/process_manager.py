@@ -9,6 +9,8 @@ from typing import Protocol
 
 RUNNING_STATES = {"PD", "PENDING", "QUEUED", "H", "HELD", "R", "RUNNING"}
 DONE_STATES = {"CD", "COMPLETED", "FINISHED", "F", "FAILED", "CA", "CANCELLED", "TO", "TIMEOUT"}
+FAILED_STATUS = 1
+SUCCESS_STATUS = 0
 GFLOW_POLL_SECONDS = 2.0
 GFLOW_COMMANDS = ["gflowd", "gbatch", "gqueue", "gjob", "gcancel"]
 GFLOW_PROJECT = "orchestra"
@@ -37,6 +39,8 @@ class GflowJob:
         if now - self.last_poll_at < GFLOW_POLL_SECONDS:
             return self.last_status
         self.last_poll_at = now
+        if self.last_status is not None:
+            return self.last_status
         result = subprocess.run(
             ["gjob", "show", self.job_id],
             check=False,
@@ -45,7 +49,7 @@ class GflowJob:
             text=True,
         )
         if result.returncode != 0:
-            self.last_status = 1
+            self.last_status = FAILED_STATUS
             return self.last_status
         output = result.stdout
         states = [
@@ -53,12 +57,16 @@ class GflowJob:
             for line in output.splitlines()
             if line.lower().startswith("state:")
         ]
-        assert states, output
+        if not states:
+            self.last_status = FAILED_STATUS
+            return self.last_status
         state = states[0]
         if state in RUNNING_STATES:
             self.last_status = None
         elif state in DONE_STATES:
-            self.last_status = 0 if state in {"CD", "COMPLETED", "FINISHED"} else 1
+            self.last_status = (
+                SUCCESS_STATUS if state in {"CD", "COMPLETED", "FINISHED"} else FAILED_STATUS
+            )
         else:
             self.last_status = None
         return self.last_status

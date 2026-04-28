@@ -2,6 +2,7 @@ from orchestra.config import load_config
 from orchestra.hardware import detect_hardware
 from orchestra.nodes import local_node_status
 from orchestra.process_manager import (
+    GflowJob,
     missing_gflow_commands,
     process_manager_kind,
     safe_name,
@@ -105,6 +106,22 @@ def test_forced_gflow_fails_fast_when_missing(monkeypatch) -> None:
     assert "gflowd" in missing_gflow_commands()
     with pytest.raises(AssertionError, match="gflow process manager requested"):
         process_manager_kind("gflow")
+
+
+def test_gflow_poll_marks_missing_job_failed(monkeypatch, tmp_path) -> None:
+    import subprocess
+
+    def fake_run(*_, **__) -> subprocess.CompletedProcess:
+        return subprocess.CompletedProcess(
+            args=["gjob", "show", "40839"],
+            returncode=0,
+            stdout="Error: Job 40839 not found\n",
+        )
+
+    monkeypatch.setattr("orchestra.process_manager.subprocess.run", fake_run)
+    job = GflowJob(job_id="40839", script_path=tmp_path / "worker.sh")
+    assert job.poll() == 1
+    assert job.poll() == 1
 
 
 def test_vram_is_advisory_not_a_hard_route_block(monkeypatch) -> None:
