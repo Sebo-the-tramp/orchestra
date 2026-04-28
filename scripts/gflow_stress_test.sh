@@ -12,6 +12,7 @@ PROGRESS_SECONDS="${ORCHESTRA_TEST_PROGRESS_SECONDS:-10}"
 START_STACK="${ORCHESTRA_TEST_START_STACK:-1}"
 USE_TMUX="${ORCHESTRA_TEST_USE_TMUX:-1}"
 RESET_TMUX="${ORCHESTRA_TEST_RESET_TMUX:-1}"
+STOP_EXISTING="${ORCHESTRA_TEST_STOP_EXISTING:-$RESET_TMUX}"
 TMUX_SESSION="${ORCHESTRA_TEST_TMUX_SESSION:-orchestra_gflow_test}"
 PROCESS_MANAGER="${ORCHESTRA_PROCESS_MANAGER:-auto}"
 QWEN_35B_MODEL="${ORCHESTRA_TEST_QWEN_35B_MODEL:-qwen3.6-35b}"
@@ -116,6 +117,45 @@ wait_http() {
     return 1
 }
 
+broker_bind_port() {
+    python - <<'PY'
+from orchestra.config import load_config
+
+print(load_config().broker_bind_address.rsplit(":", 1)[-1])
+PY
+}
+
+kill_port() {
+    local port="$1"
+    local label="$2"
+    local pids=""
+    if have lsof; then
+        pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    fi
+    if [ -z "$pids" ] && have fuser; then
+        pids="$(fuser "$port/tcp" 2>/dev/null || true)"
+    fi
+    if [ -z "$pids" ]; then
+        return
+    fi
+    log "Reset: chiudo $label sulla porta $port: $pids"
+    kill $pids >/dev/null 2>&1 || true
+    sleep 1
+    kill -9 $pids >/dev/null 2>&1 || true
+}
+
+reset_existing_stack() {
+    if [ "$STOP_EXISTING" != "1" ]; then
+        return
+    fi
+    if have tmux && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        log "Reset: chiudo tmux session $TMUX_SESSION"
+        tmux kill-session -t "$TMUX_SESSION"
+    fi
+    kill_port "$API_PORT" "API"
+    kill_port "$(broker_bind_port)" "broker"
+}
+
 tmux_cmd() {
     local pane="$1"
     local command="$2"
@@ -204,10 +244,16 @@ start_background_stack() {
 
 start_stack() {
     export ORCHESTRA_PROCESS_MANAGER="$PROCESS_MANAGER"
+    reset_existing_stack
     if have gflowd && have gqueue; then
         uv run orchestra gflow up >"$OUT_DIR/gflow-up.out" 2>"$OUT_DIR/gflow-up.err"
     fi
     if curl -fsS "$API_URL/health" >/dev/null 2>&1; then
+        if [ "$STOP_EXISTING" = "1" ]; then
+            log "API ancora attiva dopo reset: $API_URL"
+            log "Chiudi il processo manualmente o usa ORCHESTRA_TEST_API_PORT=8011."
+            exit 1
+        fi
         log "API gia' attiva: $API_URL"
         log "Uso lo stack gia' avviato; il process manager dipende da quel broker."
         return
