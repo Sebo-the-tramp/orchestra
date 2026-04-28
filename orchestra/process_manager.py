@@ -12,6 +12,11 @@ DONE_STATES = {"CD", "COMPLETED", "FINISHED", "F", "FAILED", "CA", "CANCELLED", 
 GFLOW_POLL_SECONDS = 2.0
 GFLOW_COMMANDS = ["gflowd", "gbatch", "gqueue", "gjob", "gcancel"]
 GFLOW_PROJECT = "orchestra"
+GFLOW_INSTALL_COMMANDS = [
+    "uv tool install runqd",
+    "pipx install runqd",
+    "cargo install gflow",
+]
 
 
 class ManagedProcess(Protocol):
@@ -74,7 +79,8 @@ def assert_gflow_available() -> None:
     missing = missing_gflow_commands()
     assert not missing, (
         "gflow process manager requested but commands are missing: "
-        f"{', '.join(missing)}. Install gflow or use ORCHESTRA_PROCESS_MANAGER=auto/local."
+        f"{', '.join(missing)}. Install with 'uv tool install runqd' "
+        "or use ORCHESTRA_PROCESS_MANAGER=auto/local."
     )
 
 

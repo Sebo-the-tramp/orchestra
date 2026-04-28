@@ -59,7 +59,9 @@ preflight_process_manager() {
     done
     if [ "${#missing[@]}" -gt 0 ]; then
         log "ERRORE: ORCHESTRA_PROCESS_MANAGER=gflow ma mancano comandi: ${missing[*]}"
-        log "Installa gflow oppure usa ORCHESTRA_PROCESS_MANAGER=auto/local."
+        log "Installa con: uv tool install runqd"
+        log "Poi verifica: which gflowd gbatch gqueue gjob gcancel"
+        log "Oppure usa ORCHESTRA_PROCESS_MANAGER=auto/local."
         exit 1
     fi
 }

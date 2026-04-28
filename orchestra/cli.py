@@ -20,6 +20,7 @@ from orchestra.model_store import (
 from orchestra.nodes import NodeSpec, load_node_specs, local_node_status, write_node_spec
 from orchestra.process_manager import (
     GFLOW_COMMANDS,
+    GFLOW_INSTALL_COMMANDS,
     gflow_available,
     missing_gflow_commands,
     process_manager_kind,
@@ -914,11 +915,25 @@ def gflow_status() -> None:
         table.add_row(command, "yes" if shutil.which(command) else "missing")
     table.add_row("available", "yes" if gflow_available() else "no")
     table.add_row("missing", ", ".join(missing_gflow_commands()))
+    table.add_row("install", GFLOW_INSTALL_COMMANDS[0])
     table.add_row("configured_manager", config.process_manager)
     if config.process_manager == "gflow" and not gflow_available():
         table.add_row("resolved_manager", "blocked: missing gflow commands")
     else:
         table.add_row("resolved_manager", process_manager_kind(config.process_manager))
+    console.print(table)
+
+
+@gflow_app.command("install-plan")
+def gflow_install_plan() -> None:
+    table = Table(title="gflow Install Plan")
+    table.add_column("Option")
+    table.add_column("Command")
+    table.add_row("recommended", GFLOW_INSTALL_COMMANDS[0])
+    table.add_row("pipx", GFLOW_INSTALL_COMMANDS[1])
+    table.add_row("cargo", GFLOW_INSTALL_COMMANDS[2])
+    table.add_row("verify", "which gflowd gbatch gqueue gjob gcancel")
+    table.add_row("start", "gflowd up")
     console.print(table)
 
 
