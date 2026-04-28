@@ -156,10 +156,10 @@ reset_existing_stack() {
     kill_port "$(broker_bind_port)" "broker"
 }
 
-tmux_cmd() {
-    local pane="$1"
+tmux_window() {
+    local window="$1"
     local command="$2"
-    tmux send-keys -t "$TMUX_SESSION:0.$pane" "$command" C-m
+    tmux send-keys -t "$TMUX_SESSION:$window" "$command" C-m
 }
 
 gpu_monitor_command() {
@@ -204,20 +204,19 @@ start_tmux_stack() {
         tmux kill-session -t "$TMUX_SESSION"
     fi
     if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-        tmux new-session -d -s "$TMUX_SESSION" -n "stack" -c "$ROOT"
-        tmux split-window -h -t "$TMUX_SESSION:0.0" -c "$ROOT"
-        tmux split-window -v -t "$TMUX_SESSION:0.0" -c "$ROOT"
-        tmux split-window -v -t "$TMUX_SESSION:0.1" -c "$ROOT"
-        tmux split-window -v -t "$TMUX_SESSION:0.2" -c "$ROOT"
-        tmux split-window -v -t "$TMUX_SESSION:0.3" -c "$ROOT"
-        tmux select-layout -t "$TMUX_SESSION:0" tiled
-        tmux rename-window -t "$TMUX_SESSION:0" "orchestra"
-        tmux_cmd 0 "$broker_command"
-        tmux_cmd 1 "$api_command"
-        tmux_cmd 2 "$gqueue_cmd"
-        tmux_cmd 3 "$gpu_cmd"
-        tmux_cmd 4 "$broker_tail"
-        tmux_cmd 5 "$api_tail"
+        tmux new-session -d -s "$TMUX_SESSION" -n "broker" -c "$ROOT"
+        tmux new-window -t "$TMUX_SESSION" -n "api" -c "$ROOT"
+        tmux new-window -t "$TMUX_SESSION" -n "gqueue" -c "$ROOT"
+        tmux new-window -t "$TMUX_SESSION" -n "gpu" -c "$ROOT"
+        tmux new-window -t "$TMUX_SESSION" -n "broker-log" -c "$ROOT"
+        tmux new-window -t "$TMUX_SESSION" -n "api-log" -c "$ROOT"
+        tmux_window "broker" "$broker_command"
+        tmux_window "api" "$api_command"
+        tmux_window "gqueue" "$gqueue_cmd"
+        tmux_window "gpu" "$gpu_cmd"
+        tmux_window "broker-log" "$broker_tail"
+        tmux_window "api-log" "$api_tail"
+        tmux select-window -t "$TMUX_SESSION:broker"
     fi
     STACK_IN_TMUX="1"
     log "Stack avviato in tmux: tmux attach -t $TMUX_SESSION"
@@ -453,7 +452,6 @@ main() {
     fi
     start_watchers
 
-    run_generate "00_dummy_broker_gflow" "orchestra/dummy-echo" "ping" 16
     run_generate "01_qwen35_cold" "$QWEN_35B_MODEL" "Rispondi solo con: qwen35 ok" 32
     run_generate "02_qwen9_after_35_eviction" "$QWEN_9B_MODEL" "Rispondi solo con: qwen9 ok" 32
     run_generate "03_qwen35_reload" "$QWEN_35B_MODEL" "Rispondi solo con: qwen35 reload ok" 32
