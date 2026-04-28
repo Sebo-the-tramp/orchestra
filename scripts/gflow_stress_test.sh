@@ -8,7 +8,11 @@ API_PORT="${ORCHESTRA_TEST_API_PORT:-8010}"
 API_URL="${ORCHESTRA_TEST_API_URL:-http://$API_HOST:$API_PORT}"
 TIMEOUT_S="${ORCHESTRA_TEST_TIMEOUT_S:-1200}"
 TIMEOUT_MS="${ORCHESTRA_TEST_TIMEOUT_MS:-1200000}"
+PROGRESS_SECONDS="${ORCHESTRA_TEST_PROGRESS_SECONDS:-10}"
 START_STACK="${ORCHESTRA_TEST_START_STACK:-1}"
+USE_TMUX="${ORCHESTRA_TEST_USE_TMUX:-1}"
+RESET_TMUX="${ORCHESTRA_TEST_RESET_TMUX:-1}"
+TMUX_SESSION="${ORCHESTRA_TEST_TMUX_SESSION:-orchestra_gflow_test}"
 PROCESS_MANAGER="${ORCHESTRA_PROCESS_MANAGER:-auto}"
 QWEN_35B_MODEL="${ORCHESTRA_TEST_QWEN_35B_MODEL:-qwen3.6-35b}"
 QWEN_9B_MODEL="${ORCHESTRA_TEST_QWEN_9B_MODEL:-qwen3.5-9b}"
@@ -27,6 +31,7 @@ SUMMARY="$OUT_DIR/summary.tsv"
 BROKER_PID=""
 API_PID=""
 GQUEUE_PID=""
+STACK_IN_TMUX="0"
 
 mkdir -p "$OUT_DIR"
 
@@ -59,7 +64,9 @@ run_timed() {
     shift
     local out="$OUT_DIR/$name.out"
     local err="$OUT_DIR/$name.err"
+    local status_file="$OUT_DIR/$name.status"
     local start
+    rm -f "$status_file"
     start="$(python - <<'PY'
 import time
 
@@ -67,12 +74,24 @@ print(time.time())
 PY
 )"
     log "START $name"
-    if have timeout; then
-        timeout "${TIMEOUT_S}s" "$@" >"$out" 2>"$err"
-    else
-        "$@" >"$out" 2>"$err"
-    fi
-    local status="$?"
+    (
+        if have timeout; then
+            timeout "${TIMEOUT_S}s" "$@" >"$out" 2>"$err"
+        else
+            "$@" >"$out" 2>"$err"
+        fi
+        printf '%s\n' "$?" >"$status_file"
+    ) &
+    local command_pid="$!"
+    while [ ! -f "$status_file" ]; do
+        sleep "$PROGRESS_SECONDS"
+        if [ ! -f "$status_file" ]; then
+            log "WAIT  $name $(elapsed "$start")s; tmux: tmux attach -t $TMUX_SESSION"
+        fi
+    done
+    wait "$command_pid" >/dev/null 2>&1
+    local status
+    status="$(cat "$status_file")"
     local seconds
     seconds="$(elapsed "$start")"
     if [ "$status" = "0" ]; then
@@ -97,11 +116,75 @@ wait_http() {
     return 1
 }
 
-start_stack() {
-    export ORCHESTRA_PROCESS_MANAGER="$PROCESS_MANAGER"
-    if have gflowd && have gqueue; then
-        uv run orchestra gflow up >"$OUT_DIR/gflow-up.out" 2>"$OUT_DIR/gflow-up.err"
+tmux_cmd() {
+    local pane="$1"
+    local command="$2"
+    tmux send-keys -t "$TMUX_SESSION:0.$pane" "$command" C-m
+}
+
+gpu_monitor_command() {
+    if have nvtop; then
+        echo "nvtop"
+    elif have nvidia-smi; then
+        echo "watch -n 1 nvidia-smi"
+    else
+        echo "echo 'no GPU monitor found'; sleep infinity"
     fi
+}
+
+gqueue_command() {
+    if have gqueue; then
+        echo "watch -n 1 gqueue"
+    else
+        echo "echo 'gqueue missing'; sleep infinity"
+    fi
+}
+
+log_tail_command() {
+    local path="$1"
+    echo "touch '$path'; tail -n +1 -f '$path'"
+}
+
+start_tmux_stack() {
+    local broker_command
+    local api_command
+    local gqueue_cmd
+    local gpu_cmd
+    local broker_tail
+    local api_tail
+
+    broker_command="export ORCHESTRA_PROCESS_MANAGER='$PROCESS_MANAGER'; uv run orchestra broker start 2>&1 | tee '$BROKER_LOG'"
+    api_command="uv run orchestra api start --host '$API_HOST' --port '$API_PORT' 2>&1 | tee '$API_LOG'"
+    gqueue_cmd="$(gqueue_command)"
+    gpu_cmd="$(gpu_monitor_command)"
+    broker_tail="$(log_tail_command "$BROKER_LOG")"
+    api_tail="$(log_tail_command "$API_LOG")"
+
+    if [ "$RESET_TMUX" = "1" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        tmux kill-session -t "$TMUX_SESSION"
+    fi
+    if ! tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+        tmux new-session -d -s "$TMUX_SESSION" -n "stack" -c "$ROOT"
+        tmux split-window -h -t "$TMUX_SESSION:0.0" -c "$ROOT"
+        tmux split-window -v -t "$TMUX_SESSION:0.0" -c "$ROOT"
+        tmux split-window -v -t "$TMUX_SESSION:0.1" -c "$ROOT"
+        tmux split-window -v -t "$TMUX_SESSION:0.2" -c "$ROOT"
+        tmux split-window -v -t "$TMUX_SESSION:0.3" -c "$ROOT"
+        tmux select-layout -t "$TMUX_SESSION:0" tiled
+        tmux rename-window -t "$TMUX_SESSION:0" "orchestra"
+        tmux_cmd 0 "$broker_command"
+        tmux_cmd 1 "$api_command"
+        tmux_cmd 2 "$gqueue_cmd"
+        tmux_cmd 3 "$gpu_cmd"
+        tmux_cmd 4 "$broker_tail"
+        tmux_cmd 5 "$api_tail"
+    fi
+    STACK_IN_TMUX="1"
+    log "Stack avviato in tmux: tmux attach -t $TMUX_SESSION"
+}
+
+start_background_stack() {
+    export ORCHESTRA_PROCESS_MANAGER="$PROCESS_MANAGER"
     if curl -fsS "$API_URL/health" >/dev/null 2>&1; then
         log "API gia' attiva: $API_URL"
         log "Uso lo stack gia' avviato; il process manager dipende da quel broker."
@@ -119,6 +202,26 @@ start_stack() {
     fi
 }
 
+start_stack() {
+    export ORCHESTRA_PROCESS_MANAGER="$PROCESS_MANAGER"
+    if have gflowd && have gqueue; then
+        uv run orchestra gflow up >"$OUT_DIR/gflow-up.out" 2>"$OUT_DIR/gflow-up.err"
+    fi
+    if curl -fsS "$API_URL/health" >/dev/null 2>&1; then
+        log "API gia' attiva: $API_URL"
+        log "Uso lo stack gia' avviato; il process manager dipende da quel broker."
+        return
+    fi
+    if [ "$USE_TMUX" = "1" ] && have tmux; then
+        start_tmux_stack
+        if ! wait_http "$API_URL/health"; then
+            log "API non raggiungibile dopo 60s; controlla: tmux attach -t $TMUX_SESSION"
+        fi
+        return
+    fi
+    start_background_stack
+}
+
 start_watchers() {
     if have gqueue; then
         while true; do
@@ -133,6 +236,9 @@ start_watchers() {
 cleanup() {
     if [ -n "$GQUEUE_PID" ]; then
         kill "$GQUEUE_PID" >/dev/null 2>&1
+    fi
+    if [ "$STACK_IN_TMUX" = "1" ]; then
+        return
     fi
     if [ "$START_STACK" = "1" ] && [ -n "$API_PID" ]; then
         kill "$API_PID" >/dev/null 2>&1
@@ -289,6 +395,7 @@ main() {
     trap cleanup EXIT
     printf 'case\tstatus\tseconds\tfile\n' >"$SUMMARY"
     log "Output: $OUT_DIR"
+    log "tmux session: $TMUX_SESSION"
     make_assets
     snapshot
     if [ "$START_STACK" = "1" ]; then
@@ -300,6 +407,7 @@ main() {
     fi
     start_watchers
 
+    run_generate "00_dummy_broker_gflow" "orchestra/dummy-echo" "ping" 16
     run_generate "01_qwen35_cold" "$QWEN_35B_MODEL" "Rispondi solo con: qwen35 ok" 32
     run_generate "02_qwen9_after_35_eviction" "$QWEN_9B_MODEL" "Rispondi solo con: qwen9 ok" 32
     run_generate "03_qwen35_reload" "$QWEN_35B_MODEL" "Rispondi solo con: qwen35 reload ok" 32
