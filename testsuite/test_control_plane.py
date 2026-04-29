@@ -238,6 +238,42 @@ def test_stopping_worker_blocks_same_key_respawn() -> None:
     assert has_stopping_worker_for_key(state, "same-key")
 
 
+def test_global_fifo_keeps_older_model_jobs_ahead() -> None:
+    from broker_core import BrokerState, Job, head_job
+
+    state = BrokerState()
+    first = Job(
+        "first-9b",
+        b"client",
+        {"model_name": "qwen3.5-9b"},
+    )
+    second = Job(
+        "second-9b",
+        b"client",
+        {"model_name": "qwen3.5-9b"},
+    )
+    third = Job(
+        "third-35b",
+        b"client",
+        {"model_name": "qwen3.6-35b"},
+    )
+    state.enqueue_job(first)
+    state.enqueue_job(second)
+    state.enqueue_job(third)
+
+    current = head_job(state)
+    assert current is not None
+    _, first_queue, first_job = current
+    assert first_job.request_id == "first-9b"
+    first_queue.popleft()
+    state.job_order.popleft()
+
+    current = head_job(state)
+    assert current is not None
+    _, _, next_job = current
+    assert next_job.request_id == "second-9b"
+
+
 def test_text_generation_routing_returns_candidates() -> None:
     config = load_config()
     registry = load_registry()

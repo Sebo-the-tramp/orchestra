@@ -92,12 +92,14 @@ class BrokerState:
     worker_registry: dict[str, WorkerPool] = field(default_factory=dict)
     worker_map: dict[str, Worker] = field(default_factory=dict)
     jobs_registry: dict[str, deque[Job]] = field(default_factory=dict)
+    job_order: deque[str] = field(default_factory=deque)
     pending_jobs: dict[str, Job] = field(default_factory=dict)
     inflight_by_worker: dict[str, Job] = field(default_factory=dict)
 
     def enqueue_job(self, job: Job) -> None:
         key = worker_key(job.payload)
         self.jobs_registry.setdefault(key, deque()).append(job)
+        self.job_order.append(job.request_id)
 
     def spawn_worker_for_job(self, job: Job) -> None:
         model = model_for_payload(job.payload)
@@ -395,69 +397,107 @@ def evict_idle_workers_without_work(socket: zmq.Socket, state: BrokerState) -> N
             shutdown_idle_worker(socket, state, worker_id, "idle_no_queue")
 
 
+def prune_job_order(state: BrokerState) -> None:
+    while state.job_order:
+        request_id = state.job_order[0]
+        if any(
+            job_queue and job_queue[0].request_id == request_id
+            for job_queue in state.jobs_registry.values()
+        ):
+            return
+        state.job_order.popleft()
+
+
+def head_job(state: BrokerState) -> tuple[str, deque[Job], Job] | None:
+    prune_job_order(state)
+    if not state.job_order:
+        return None
+    request_id = state.job_order[0]
+    for key, job_queue in state.jobs_registry.items():
+        if job_queue and job_queue[0].request_id == request_id:
+            return key, job_queue, job_queue[0]
+    state.job_order.popleft()
+    return head_job(state)
+
+
+def reject_start_failed(
+    socket: zmq.Socket,
+    state: BrokerState,
+    key: str,
+    job_queue: deque[Job],
+) -> None:
+    job = job_queue.popleft()
+    prune_job_order(state)
+    payload = error_payload(
+        job.request_id,
+        "WORKER_START_FAILED",
+        f"Worker failed to start after {MAX_WORKER_SPAWN_ATTEMPTS} attempts",
+        job.payload["model_name"],
+    )
+    send_client_payload(socket, job.client_id, payload)
+    append_job_event(
+        "rejected",
+        job.request_id,
+        model=job.payload["model_name"],
+        code="WORKER_START_FAILED",
+    )
+    emit(
+        "request_rejected",
+        request_id=job.request_id,
+        model=job.payload["model_name"],
+        code="WORKER_START_FAILED",
+    )
+    if not job_queue:
+        state.jobs_registry.pop(key, None)
+
+
+def dispatch_head_job(socket: zmq.Socket, state: BrokerState) -> bool:
+    current = head_job(state)
+    if current is None:
+        return False
+    key, job_queue, job = current
+    pool = state.worker_registry.get(key)
+    if pool is not None and pool.is_empty():
+        del state.worker_registry[key]
+        pool = None
+    if pool is None:
+        if has_stopping_worker_for_key(state, key):
+            return False
+        if idle_pressure_blocks_spawn(socket, state, key):
+            return False
+        if job.spawn_attempts >= MAX_WORKER_SPAWN_ATTEMPTS:
+            reject_start_failed(socket, state, key, job_queue)
+            return True
+        job.spawn_attempts += 1
+        state.spawn_worker_for_job(job)
+        return False
+    if pool.wait_workers or not pool.idle_workers:
+        return False
+
+    worker_id = pool.idle_workers.pop()
+    pool.set_busy(worker_id)
+    set_worker_busy(state.worker_map[worker_id])
+    job = job_queue.popleft()
+    state.job_order.popleft()
+    state.pending_jobs[job.request_id] = job
+    state.inflight_by_worker[worker_id] = job
+    emit("request_dispatch", request_id=job.request_id, worker_id=worker_id, key=key)
+    append_job_event("dispatched", job.request_id, worker_id=worker_id, key=key)
+    job.payload.setdefault("profile", {})["broker_dispatch_started_time"] = time.time_ns()
+    model_name = job.payload["model_name"]
+    destination = f"{model_name}-{worker_id}".encode("utf-8")
+    socket.send_multipart(
+        [destination, b"", json.dumps(job.payload).encode("utf-8"), *job.images]
+    )
+    if not job_queue:
+        state.jobs_registry.pop(key, None)
+    return True
+
+
 def dispatch_jobs(socket: zmq.Socket, state: BrokerState) -> None:
     evict_idle_workers_without_work(socket, state)
-    queues_to_remove = []
-    for key, job_queue in state.jobs_registry.items():
-        if not job_queue:
-            queues_to_remove.append(key)
-            continue
-
-        pool = state.worker_registry.get(key)
-        if pool is not None and pool.is_empty():
-            del state.worker_registry[key]
-            pool = None
-        if pool is None:
-            if has_stopping_worker_for_key(state, key):
-                continue
-            if idle_pressure_blocks_spawn(socket, state, key):
-                continue
-            job = job_queue[0]
-            if job.spawn_attempts >= MAX_WORKER_SPAWN_ATTEMPTS:
-                job_queue.popleft()
-                payload = error_payload(
-                    job.request_id,
-                    "WORKER_START_FAILED",
-                    f"Worker failed to start after {MAX_WORKER_SPAWN_ATTEMPTS} attempts",
-                    job.payload["model_name"],
-                )
-                send_client_payload(socket, job.client_id, payload)
-                append_job_event(
-                    "rejected",
-                    job.request_id,
-                    model=job.payload["model_name"],
-                    code="WORKER_START_FAILED",
-                )
-                emit(
-                    "request_rejected",
-                    request_id=job.request_id,
-                    model=job.payload["model_name"],
-                    code="WORKER_START_FAILED",
-                )
-                continue
-            job.spawn_attempts += 1
-            state.spawn_worker_for_job(job)
-            continue
-        if pool.wait_workers or not pool.idle_workers:
-            continue
-
-        worker_id = pool.idle_workers.pop()
-        pool.set_busy(worker_id)
-        set_worker_busy(state.worker_map[worker_id])
-        job = job_queue.popleft()
-        state.pending_jobs[job.request_id] = job
-        state.inflight_by_worker[worker_id] = job
-        emit("request_dispatch", request_id=job.request_id, worker_id=worker_id, key=key)
-        append_job_event("dispatched", job.request_id, worker_id=worker_id, key=key)
-        job.payload.setdefault("profile", {})["broker_dispatch_started_time"] = time.time_ns()
-        model_name = job.payload["model_name"]
-        destination = f"{model_name}-{worker_id}".encode("utf-8")
-        socket.send_multipart(
-            [destination, b"", json.dumps(job.payload).encode("utf-8"), *job.images]
-        )
-
-    for key in queues_to_remove:
-        del state.jobs_registry[key]
+    while dispatch_head_job(socket, state):
+        pass
 
 
 def purge_dead_workers(state: BrokerState) -> None:
