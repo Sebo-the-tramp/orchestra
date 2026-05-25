@@ -1,57 +1,63 @@
 # Architecture
 
-## Runtime Shape
+## Runtime
 
 ```text
-client (REQ)
-  -> broker_core.py (ROUTER)
-      -> validate model_name against models/*/config.yaml
-      -> append Job to the per-model deque
-      -> spawn a worker if no pool exists for that model
-      -> hand the next queued Job to an idle worker
-      -> forward SUCCESS / ERROR back to the original client
-  -> worker (DEALER)
+client REQ
+  -> broker ROUTER
+      -> validate model_name against discovered workers
+      -> append job to a per-model queue
+      -> start worker if needed
+      -> send queued job to an idle worker
+      -> forward worker reply
+  -> worker DEALER
       -> send HEARTBEAT
-      -> poll for work
+      -> receive work
       -> run inference
-      -> return SUCCESS / ERROR
+      -> return SUCCESS or ERROR
 ```
 
-## Main Pieces
+## Main Files
 
 | Path | Role |
 | --- | --- |
-| `broker_core.py` | Main event loop, job queues, worker spawn, result forwarding |
-| `models/*/config.yaml` | Declares which model names exist and where their worker lives |
-| `models/*/schema.py` | Intended request/response validation surface |
-| `models/*/*/worker.py` | Actual inference worker entrypoints |
-| `utils/transport.py` | Shared worker socket helper |
-| `utils/image_io.py` | Shared image decoding helpers |
+| `broker_core.py` | Main loop, queues, workers, replies |
+| `models/**/worker.py` | Active worker files discovered at broker startup |
+| `models_available` | Static dictionary inside each active worker |
+| `models/*/config.yaml` | Legacy model config files still in the tree |
+| `models/*/schema.py` | Intended validation layer |
+| `models/*/*/worker.py` | Model-family worker |
+| `utils/transport.py` | Worker socket setup |
+| `utils/image_io.py` | Image decode helpers |
 
-## Broker State
+## Broker Memory
 
-The broker keeps three core structures in memory:
-
-| Structure | Purpose |
+| Structure | Use |
 | --- | --- |
-| `jobs_registry` | Per-model `deque` of queued jobs |
-| `worker_registry` | Per-model `WorkerPool` split into waiting, idle, and busy worker ids |
-| `pending_jobs` / `inflight_by_worker` | Maps running work back to the original client id |
+| `jobs_registry` | One `deque` per model |
+| `worker_registry` | Waiting, idle, and busy workers per model |
+| `pending_jobs` | Original client for each request |
+| `inflight_by_worker` | Running job for each busy worker |
 
 ## Worker Lifecycle
 
-1. A client submits a multipart request with a `model_name`.
-2. The broker rejects unknown models immediately.
-3. The job is appended to that model's queue.
-4. If no worker pool exists for the model, the broker spawns one from the registered worker path.
-5. Workers announce themselves with `HEARTBEAT`.
-6. Once a worker is idle, the broker sends the queued job as multipart frames.
-7. The worker returns either `SUCCESS` or `ERROR`.
-8. The broker forwards that payload to the original client and marks the worker idle again.
+1. Client sends a request with `model_name`.
+2. Broker rejects unknown models.
+3. Broker queues the job.
+4. Broker starts a worker if no pool exists.
+5. Worker sends `HEARTBEAT`.
+6. Broker marks the worker idle.
+7. Broker sends the next queued job.
+8. Worker returns `SUCCESS` or `ERROR`.
+9. Broker forwards the payload to the client.
+10. Broker marks the worker idle again.
 
-## Current Constraints
+## Constraints
 
-- The runtime host and broker address are still hardcoded around `tcp://10.10.151.14:5556`.
-- The broker uses a single `ROUTER` socket for both client and worker traffic.
-- Idle shutdown is model-specific in the worker code today: InternVL uses `10s`, SAM3 uses `30s`.
-- The docs reflect the current code, not an idealized target architecture.
+| Area | Status |
+| --- | --- |
+| Broker address | 🟡 Hardcoded around `tcp://10.10.151.14:5556` |
+| Socket topology | 🟡 One `ROUTER` handles clients and workers |
+| Registry source | 🟡 Code uses `worker.py`, not the older `config.yaml` path |
+| Idle timeout | 🟡 Base worker default is `60s`; older workers have local values |
+| Docs | 🟢 Describe current code, not target design |

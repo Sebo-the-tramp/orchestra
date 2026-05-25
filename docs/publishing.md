@@ -1,41 +1,42 @@
 # Publishing
 
-## Local Build
+## Local
 
-Preview the docs locally:
+Preview:
 
 ```bash
 uv run --no-project --with mkdocs-material mkdocs serve
 ```
 
-Create the static output:
+Build:
 
 ```bash
 uv run --no-project --with mkdocs-material mkdocs build --strict
 ```
 
-The generated site lands in `site/`, which is ignored by git.
+Output goes to `site/`.
 
 ## GitHub Pages
 
-This repo now includes a Pages workflow at `.github/workflows/docs.yml`.
+Workflow: `.github/workflows/docs.yml`
 
-It does three things:
+It:
 
-1. Checks out the repository.
-2. Builds the MkDocs site with `uv`.
-3. Uploads `site/` and deploys it through GitHub Pages.
+1. Checks out the repo.
+2. Builds MkDocs with `uv`.
+3. Uploads `site/`.
+4. Deploys through GitHub Pages.
 
-## One-Time GitHub Setup
+## Repo Setup
 
-For the repository at `https://github.com/Sebo-the-tramp/orchestra`:
+For `https://github.com/Sebo-the-tramp/orchestra`:
 
-1. Push the new workflow to `main`.
+1. Push the workflow to `main`.
 2. Open `Settings -> Pages`.
 3. Set `Build and deployment -> Source` to `GitHub Actions`.
-4. Let the `docs` workflow finish once on `main`.
+4. Wait for the `docs` workflow on `main`.
 
-With the current repo name, the published URL is expected to be:
+Expected URL:
 
 ```text
 https://sebo-the-tramp.github.io/orchestra/
@@ -43,5 +44,7 @@ https://sebo-the-tramp.github.io/orchestra/
 
 ## Notes
 
-- `site_url` in `mkdocs.yml` assumes the repository keeps the same owner and name.
-- If you later add a custom domain, you can drop a `CNAME` file into `docs/`.
+| Setting | Notes |
+| --- | --- |
+| `site_url` | Assumes owner and repo stay the same |
+| Custom domain | Add `docs/CNAME` later |

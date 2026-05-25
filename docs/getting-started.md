@@ -1,51 +1,51 @@
 # Getting Started
 
-## What You Need
+Run commands from the repository root unless noted.
 
-| Requirement | Why |
+## Requirements
+
+| Requirement | Notes |
 | --- | --- |
-| Python `>=3.12` | Declared in the root project metadata |
-| `uv` | Used for local commands and docs preview |
-| A broker host reachable at `tcp://10.10.151.14:5556` | Hardcoded in the current runtime |
-| Per-worker virtual environments | The broker spawns `models/<lab>/<family>/.venv/bin/python` directly |
+| Python `>=3.12` | Root project metadata |
+| `uv` | Package and command runner |
+| Broker host | Current code expects `tcp://10.10.151.14:5556` |
+| Worker venvs | Broker launches `models/<lab>/<family>/.venv/bin/python` |
 
-## Preview The Docs Locally
+## Docs
 
-The docs toolchain is isolated from the project install for now:
+Preview:
 
 ```bash
 uv run --no-project --with mkdocs-material mkdocs serve
 ```
 
-Build the static site without starting a local server:
+Build:
 
 ```bash
 uv run --no-project --with mkdocs-material mkdocs build --strict
 ```
 
-## Run Orchestra
+## Runtime
 
-Install the root environment:
+Install:
 
 ```bash
 uv sync
 ```
 
-Start the broker from the repository root:
+Start broker:
 
 ```bash
 uv run python broker_core.py
 ```
 
-Or start the tmux dashboard:
+Start tmux view:
 
 ```bash
 ./start_orchestra.sh
 ```
 
-## Worker Assumptions
-
-The current broker is strict about worker layout:
+## Worker Layout
 
 ```text
 models/<lab>/
@@ -56,16 +56,12 @@ models/<lab>/
     .venv/
 ```
 
-If a model is declared in `config.yaml` and the worker path does not contain both `worker.py`
-and `.venv/bin/python`, worker spawn fails immediately.
+If `worker.py` or `.venv/bin/python` is missing, spawn fails.
 
-## Send A Test Request
+## Test Requests
 
-Two small request examples already exist:
-
-| Model | File |
+| Model | Script | Status |
 | --- | --- |
-| InternVL | `tests/test_intern.py` |
-| SAM3 | `tests/sam.py` |
-
-Those scripts show the current multipart request format used by the broker.
+| DINOv3 | Add a client payload matching `models/facebook/dinov3/worker.py` | 🟢 Active worker |
+| InternVL | `tests/test_intern.py` | 🟡 Worker file is `worker_tofix.py` |
+| SAM3 | `tests/sam.py` | 🟡 Worker file is `worker_tofix.py` |

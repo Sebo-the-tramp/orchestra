@@ -1,27 +1,47 @@
 # Models
 
-## Registry Layout
+## Registry
 
-Each lab folder is expected to provide three things:
+The live broker scans for `worker.py` files and reads a static
+`models_available` dictionary from each one.
 
-| File | Purpose |
+| File | Use |
 | --- | --- |
-| `models/<lab>/config.yaml` | Maps public `model_name` values to worker folders and resource hints |
-| `models/<lab>/schema.py` | Pydantic request/response models |
-| `models/<lab>/<family>/worker.py` | The executable worker entrypoint |
+| `models/<lab>/<family>/worker.py` | Active worker entrypoint |
+| `models_available` | Public names, worker folder, resource hints |
+| `models/<lab>/config.yaml` | Older config path, still present |
+| `models/<lab>/schema.py` | Shared schema target |
 
 ## Current Families
 
-| Family | Registry Pattern | Worker Path | Notes |
+| Family | Public Name | Worker | Status |
 | --- | --- | --- | --- |
-| InternVL | `OpenGVLab/InternVL*` | `models/OpenGVLab/InternVL/worker.py` | VLM worker using `lmdeploy` |
-| SAM3 | `facebook/sam3` | `models/facebook/sam3/worker.py` | Image segmentation worker built on the local `sam3` checkout |
+| DINOv3 | `facebook/dinov3-*` | `models/facebook/dinov3/worker.py` | 🟢 Active |
+| InternVL | `OpenGVLab/InternVL*` | `models/OpenGVLab/InternVL/worker_tofix.py` | 🟡 Not active |
+| SAM3 | `facebook/sam3` | `models/facebook/sam3/worker_tofix.py` | 🟡 Not active |
+| LTX | `Lightricks/LTX-2.3` | `models/lightricks/LTX-2/worker_tofix.py` | 🟡 Not active |
 
-## Request Payloads In Practice
+## DINOv3 Payload
 
-### InternVL
+Image frames plus model args.
 
-The current InternVL path takes a single text prompt plus one or more image frames:
+```json
+{
+  "type": "REQUEST",
+  "request_id": "uuid",
+  "model_name": "facebook/dinov3-vit7b16-pretrain-lvd1689m",
+  "num_images": 1,
+  "args_per_model": {
+    "image_size": 224,
+    "device_map": "auto",
+    "torch_dtype": "float16"
+  }
+}
+```
+
+## InternVL Payload
+
+Legacy payload from the old test script.
 
 ```json
 {
@@ -34,9 +54,9 @@ The current InternVL path takes a single text prompt plus one or more image fram
 }
 ```
 
-### SAM3
+## SAM3 Payload
 
-The live worker currently expects prompt and threshold lists:
+Legacy payload from the old test script.
 
 ```json
 {
@@ -48,19 +68,13 @@ The live worker currently expects prompt and threshold lists:
 }
 ```
 
-!!! note
-
-    `models/facebook/schema.py` is still narrower than the worker implementation. The docs describe the
-    current wire format used by `tests/sam.py`, which is what the worker actually consumes today.
+`models/facebook/schema.py` is narrower than the SAM3 worker payload. The
+payload above matches `tests/sam.py`.
 
 ## Resource Hints
 
-`config.yaml` also carries lightweight scheduling hints:
-
 | Field | Meaning |
 | --- | --- |
-| `basefolder` | Relative path from `models/` to the worker directory |
-| `gpu_memory` | Current rough GPU memory requirement in MiB |
-| `tp` | Tensor parallelism hint used by some workers |
-
-These are enough for the current broker, which only needs to find the worker code and build a launch command.
+| `basefolder` | Worker path relative to `models/` |
+| `gpu_memory` / `gpu_mem` | Rough GPU memory need in MiB |
+| `tp` | Tensor parallelism hint |

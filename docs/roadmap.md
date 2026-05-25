@@ -1,24 +1,27 @@
 # Roadmap
 
-## Near-Term Cleanup
+## Cleanup
 
-| Area | Why It Matters |
+| Work | Status |
 | --- | --- |
-| Schema and worker payload alignment | The docs and runtime should describe the same contract |
-| Packaging cleanup in the root project | `uv add` currently fails on the repo layout, which blocks cleaner docs dependency management |
-| Better examples under `recipes/` | The docs can then link to stable, runnable patterns instead of test scripts |
-| Port and host centralization | Hardcoded broker addresses make deployment brittle |
+| Align schemas and worker payloads | 🟡 Needed |
+| Pick one registry path: `worker.py` discovery or `config.yaml` | 🟡 Needed |
+| Fix root packaging so `uv add` works cleanly | 🟡 Needed |
+| Move examples from `tests/` to `recipes/` | 🟡 Needed |
+| Centralize broker host and port | 🟡 Needed |
 
-## Project TODOs
+## Project Notes
 
-These goals come directly from the current project notes:
+| Goal | Status |
+| --- | --- |
+| Connectivity beyond local LAN | ⚪ Planned |
+| Broker hierarchy or larger router broker | ⚪ Planned |
+| Consistent `models/{lab}/{model_family}` layout | 🟡 Testing needed |
 
-- Extend connectivity beyond the local LAN.
-- Support a hierarchy of brokers or a larger routing broker that understands all available resources.
-- Evaluate a worker layout closer to `models/{lab}/{model_family}` everywhere and see what breaks.
+## Docs
 
-## Longer-Term Docs Targets
-
-- Auto-generate the model catalog from `models/*/config.yaml`.
-- Document a stable client API once the request schemas are enforced end-to-end.
-- Add deployment notes for multi-host brokers and remote workers.
+| Work | Status |
+| --- | --- |
+| Generate model catalog from `models/*/config.yaml` | ⚪ Planned |
+| Document stable client API | ⚪ Blocked on enforced schemas |
+| Add multi-host deployment notes | ⚪ Planned |

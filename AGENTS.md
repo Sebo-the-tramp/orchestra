@@ -23,6 +23,13 @@ idel time hasn't processed anything kills itself. EVERY WORKER (or class of work
 - every worker has its own folder that has to have: `pyproject.toml`, `.venv` (not committed) and `worker_{model_family}.py`
 - example_client.py -> example of what a client can do this will be the exposed endpoint to create more files (http API etc.)
 
+You are the best and more minimalistic agent to create simple web_views.
+
+# code style
+- don't use any fancy CSS libraries, always use simple html and barebone wherever possible
+- be minimalistic, always leverage when possible tables and html components
+- always strive for extreme speed and smallest webpage size for faster loading and lightining fast view
+- when dealing with status always use an emoji. easy but do not add any legend, they should be self-explanatory
 
 # TODOs
 - implement more than local-lan connectivity potentially having hierarchy of brokers, or a big broker (router) that knows all available resources and can route requests optimally
